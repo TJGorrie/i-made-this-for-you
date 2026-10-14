@@ -1,6 +1,82 @@
 # IMadeThisForYou
 
-An app for writing novels. It keeps your manuscript, a wiki for characters and places, a timeline, and review comments in one place. Everything is saved as ordinary Markdown files in a folder on your computer, so your writing never depends on the app.
+[![Downloads](https://img.shields.io/github/downloads/TJGorrie/i-made-this-for-you/total?label=downloads)](https://github.com/TJGorrie/i-made-this-for-you/releases)
+
+**A home for your novel and the world it lives in.** Write your book, keep track of every character and place, see when things happened, and work through your edits, all in one window.
+
+It's free, it runs on your own computer, and your writing is saved as plain text files in a folder you choose. No account, no subscription, no cloud. If you ever stop using the app, your book is still right there.
+
+![Writing a scene: linked characters and places, review comments beside the text, word counts in the sidebar](docs/img/editor.png)
+
+## Write without losing your place
+
+Your book is laid out in the sidebar as books, chapters and scenes. Drag them to reorder. Give a chapter or the whole book a word target and watch the bar fill up.
+
+Type **@** to link a character or place right in the text. It finds them by any name they go by: `@grey` finds Captain Rook, whom everyone calls the Grey Captain. Hover over a link to see who that is without leaving the page.
+
+![Typing a sentence, linking "the Grey Captain" with @grey, then hovering it to see Captain Rook's details](docs/img/writing.gif)
+
+Need your notes while you write? Shift-click anything to open it beside your scene.
+
+![A scene and a character open side by side](docs/img/split.png)
+
+## Keep your world straight
+
+Every character, place, faction and item gets its own entry, with a portrait, the details you care about, and who they're connected to. Each entry also lists every scene it appears in, automatically.
+
+![Mara Vell's entry: portrait, aliases, role, relationships](docs/img/character.png)
+
+Put your events on a timeline, in your world's own calendar. Filter it by a character, a place or a tag, and see just that thread in order.
+
+![The timeline in the story's own calendar, filtered by tag](docs/img/timeline.gif)
+
+Relationships draw themselves into a map. Filter to parents and siblings and you have a family tree.
+
+![The Vell family tree](docs/img/family-tree.png)
+
+Upload a map of your world and pin your places on it.
+
+![A map of the Salt Coast with pinned locations](docs/img/map.png)
+
+## Edit like an editor
+
+Select any passage and add a comment. Comments sit beside the text, and every one is a to-do item you can tick off. Turn on Review mode to read through without changing anything by accident.
+
+![Selecting a passage, adding a comment that appears beside it, then ticking it off](docs/img/comments.gif)
+
+The Review page gathers every open comment and note in the book, in reading order, so nothing slips through. Click one to jump straight to that passage.
+
+![Ticking off a note on the Review page, then clicking a comment to jump to it in the scene](docs/img/review.gif)
+
+## Focus when you need to
+
+Focus mode hides everything but the words.
+
+![Focus mode: just the scene](docs/img/focus.png)
+
+And a dark mode for late nights.
+
+![The editor in dark mode](docs/img/editor-dark.png)
+
+## Never lose a word
+
+The app saves as you type and keeps earlier versions of everything. Open History to read an old version and bring it back. Deleted something? It's waiting in Deleted items.
+
+![Version history, showing an earlier draft of a scene](docs/img/history.png)
+
+Search finds anything in your book or your notes as you type.
+
+![Searching for "marsh road"](docs/img/search.png)
+
+## Build the habit
+
+Set a daily word goal and keep a streak going. The writing log shows how every day went.
+
+![Three weeks of daily word counts against a 500-word goal](docs/img/writing-log.png)
+
+## Share it
+
+When it's time to send it out, export the whole book to Word, EPUB for e-readers, Markdown, or a page you can print or save as PDF. Comments and notes are left out.
 
 ## Running it
 
@@ -35,6 +111,12 @@ Your projects go in `Documents/IMadeThisForYou`. To use a different folder, chan
 
 Changing the folder doesn't move the projects you already have. Copy their folders into the new one yourself.
 
+## License
+
+IMadeThisForYou is free to use, for anything, including writing books you sell. You can share it with anyone, as long as you pass it on unchanged and don't charge for it. Changing the app, or sharing changed versions, needs permission from the author. The full terms are in [LICENSE](LICENSE).
+
+© 2026 TJGorrie. The app includes open-source software by others, credited in THIRD-PARTY-NOTICES.txt, which comes with every download. You can also open it from the projects page.
+
 ## Working on the code
 
 Run `npm install` and then `npm run dev`.
@@ -42,3 +124,5 @@ Run `npm install` and then `npm run dev`.
 To check your changes, run `npm run check`, `npm run typecheck` and `npm run test:ui`.
 
 `npm run build:app` builds the app for whichever system you're on and puts it in `release/`. To build for Windows, Mac and Linux at once, push a tag starting with `v` (for example `v0.2.0`). GitHub Actions will build all of them and attach them to a release.
+
+`npm run screenshots` rebuilds the pictures and animations in this README from a demo novel, *The Salt Road*.

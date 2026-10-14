@@ -13,5 +13,5 @@
     "lib": ["es2023", "dom"],
     "types": ["node", "vite/client"]
   },
-  "include": ["src", "server", "scripts", "tests", "vite.config.ts", "playwright.config.ts"]
+  "include": ["src", "server", "scripts", "tests", "docs", "vite.config.ts", "playwright.config.ts", "playwright.screenshots.config.ts"]
 }

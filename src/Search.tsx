@@ -5,9 +5,13 @@ import { api, plainText } from './api.ts'
 type Hit = { id: string; type: string; title: string; snippet: string }
 
 // Server marks matches with \u0001...\u0002; render them as <mark> without injecting HTML.
+// Links first (a match can sit inside one), then markup per piece, keeping the snippet's own spaces between pieces.
 const highlight = (s: string) =>
-  s.split(/(\u0001[^\u0002]*\u0002)/).map((part, i) =>
-    part.startsWith('\u0001') ? <mark key={i}>{part.slice(1, -1)}</mark> : plainText(part) && ` ${plainText(part)} `)
+  s.replace(/\[\[([^\]|]*)\|[^\]]+\]\]/g, '$1').split(/(\u0001[^\u0002]*\u0002)/).map((part, i) => {
+    if (part.startsWith('\u0001')) return <mark key={i}>{part.slice(1, -1)}</mark>
+    const text = plainText(part)
+    return text ? (/^\s/.test(part) ? ' ' : '') + text + (/\s$/.test(part) ? ' ' : '') : /\s/.test(part) ? ' ' : ''
+  })
 
 export function SearchResults({ slug, q, onOpen }: { slug: string; q: string; onOpen: (id: string) => void }) {
   const [hits, setHits] = useState<Hit[]>()

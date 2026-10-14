@@ -111,7 +111,13 @@ export function ReviewMargin({ editor }: { editor: Editor | null }) {
     setTops((old) => (old.join() === t.join() ? old : t))
   }
   useLayoutEffect(layout) // after every render: comments, panel above or box heights may have moved things
-  useEffect(() => { addEventListener('resize', layout); return () => removeEventListener('resize', layout) })
+  // Re-place the boxes whenever the text reflows: window resized, or the comment column appearing narrows it.
+  useEffect(() => {
+    if (!editor) return
+    const ro = new ResizeObserver(() => layout())
+    ro.observe(editor.view.dom)
+    return () => ro.disconnect()
+  })
   return (
     <div ref={box} className="review-margin" aria-label="Comments in the margin">
       {ranges.map((r, k) => (

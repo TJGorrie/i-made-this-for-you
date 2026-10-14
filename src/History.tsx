@@ -5,6 +5,9 @@ import { Help } from './Help.tsx'
 
 type Snapshot = { ts: number; size: number }
 
+// Stored markup as you'd read it: [[Name|id]] links show their name, inline comments just their text.
+const readable = (md: string) => md.replace(/\[\[([^\]|]*)\|[^\]]+\]\]/g, '$1').replace(/\{==([\s\S]+?)==\}\{>>[\s\S]*?<<\}/g, '$1')
+
 const when = (ts: number) => new Date(ts).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
 const formatBytes = (n: number) =>
   n < 1024 ? `${n} B` : n < 1024 ** 2 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1024 ** 2).toFixed(1)} MB`
@@ -43,8 +46,8 @@ export function HistoryPanel({ url, beforeRestore, onRestored, onClose }: PanelP
         <div className="version-preview">
           <button onClick={restore}>Restore this version</button>
           <h3>{picked.entity.title}</h3>
-          {fields.map(([k, v]) => <div key={k}><small className="muted">{k}:</small> {fieldText(v)}</div>)}
-          <div className="version-body">{picked.entity.body}</div>
+          {fields.map(([k, v]) => <div key={k}><small className="muted">{k}:</small> {readable(fieldText(v))}</div>)}
+          <div className="version-body">{readable(picked.entity.body)}</div>
         </div>
       )}
     </aside>

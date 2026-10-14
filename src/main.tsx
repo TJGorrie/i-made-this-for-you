@@ -92,7 +92,12 @@ function Settings({ onFolder }: { onFolder: (dir: string) => void }) {
       {settings.locked && <p className="muted">Set by the PROJECTS_DIR environment variable.</p>}
       {message && <p>{message}</p>}
       {settings.packaged && (
-        <p><button onClick={() => api('/quit', 'POST').then(() => setStopped(true), (e) => setMessage(e.message))}>Quit IMadeThisForYou</button></p>
+        <>
+          <p><button onClick={() => api('/quit', 'POST').then(() => setStopped(true), (e) => setMessage(e.message))}>Quit IMadeThisForYou</button></p>
+          <p className="muted">
+            © TJGorrie · <a href="/LICENSE.txt" target="_blank">License</a> · <a href="/THIRD-PARTY-NOTICES.txt" target="_blank">Third-party notices</a>
+          </p>
+        </>
       )}
     </section>
   )

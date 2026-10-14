@@ -48,6 +48,7 @@
       .tree-item .link { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .tree-item small { color: var(--muted); white-space: nowrap; }
       .tree-item progress { width: 36px; flex: none; }
+      .tree-item.depth-0 { flex-wrap: wrap; } .tree-item.depth-0 .link { flex-basis: 100%; } /* books: title on its own line, counts and buttons under it */
       .depth-1 { padding-left: 14px; } .depth-2 { padding-left: 28px; }
       .depth-0 > .link { font-weight: 600; }
       .mini { background: none; border: 1px solid var(--border-2); border-radius: 3px; padding: 0 5px; cursor: pointer; color: var(--text-2);
@@ -111,10 +112,10 @@
       .chip-open, .chip-x { border: 0; background: none; color: inherit; cursor: pointer; padding: 0 2px; }
       .chip-x { color: var(--muted); }
 
-      .timeline ol { list-style: none; padding: 0; border-left: 2px solid var(--border); margin-left: 8em; }
+      .timeline ol { list-style: none; padding: 0; border-left: 2px solid var(--border); margin-left: 10em; }
       .timeline li { position: relative; padding: 6px 0 6px 16px; }
       .timeline li::before { content: ''; position: absolute; left: -6px; top: 13px; width: 10px; height: 10px; border-radius: 50%; background: #76b7b2; }
-      .timeline .when { position: absolute; right: calc(100% + 14px); width: 8em; text-align: right; color: var(--muted); font-size: 13px; padding-top: 2px; }
+      .timeline .when { position: absolute; right: calc(100% + 14px); width: 10em; text-align: right; color: var(--muted); font-size: 13px; padding-top: 2px; }
       .timeline li .link { display: inline; font-weight: 600; }
 
       .graph { height: calc(100vh - 140px); border: 1px solid var(--border); border-radius: 4px; background: var(--panel); }
@@ -174,6 +175,10 @@
       .editor:has(.margin-note) { max-width: calc(42em + 250px); }
       .prose-wrap { position: relative; }
       .prose-wrap:has(.margin-note) { padding-right: 250px; }
+      /* Two panes side by side: too narrow for a comment column (the Review list above the text still has them). */
+      main.split .review-margin { display: none; }
+      main.split .prose-wrap { padding-right: 0; }
+      main.split .editor:has(.margin-note) { max-width: 42em; }
       .prose-wrap.reviewing .ProseMirror { cursor: default; }
       .review-margin { position: absolute; top: 0; right: 0; width: 230px; }
       .margin-note { position: absolute; left: 0; right: 0; box-sizing: border-box; display: flex; align-items: baseline; gap: 6px;

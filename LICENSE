@@ -1,0 +1,39 @@
+IMadeThisForYou License
+
+Copyright (c) 2026 TJGorrie. All rights reserved.
+
+This license covers IMadeThisForYou: its source code, the apps built from it, and
+their documentation (together, "the Software"). It does not cover the third-party
+components included with the Software. Those are listed in THIRD-PARTY-NOTICES.txt
+and remain under their own licenses.
+
+1. Use. You may download, install and use the Software free of charge, for any
+   purpose, personal or commercial. What you write with the Software belongs to
+   you. This license claims nothing over your work.
+
+2. Sharing. You may give copies of the Software to others, free of charge, as long
+   as each copy is complete and unmodified and includes this license and
+   THIRD-PARTY-NOTICES.txt. You may not sell the Software or charge for access to it.
+
+3. No changes without permission. You may read the source code, but you may not
+   modify, adapt or translate the Software, create works based on it, or
+   distribute modified versions, without written permission from TJGorrie.
+   Viewing and forking the source repository on GitHub, as GitHub's Terms of
+   Service allow, does not give you that permission.
+
+4. Suggestions. If you send TJGorrie a suggested change (for example a pull
+   request), you allow TJGorrie to use, change and publish it under any terms,
+   without payment.
+
+5. Ending. If you break these terms, your permission to use and share the
+   Software ends.
+
+6. No warranty. THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+   EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+   MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO
+   EVENT SHALL THE COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+   LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+   OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OF OR OTHER DEALINGS IN
+   THE SOFTWARE, INCLUDING ANY LOSS OF WRITING OR OTHER DATA. KEEP BACKUPS.
+
+For permission to make changes, or any other questions, contact TJGorrie.
