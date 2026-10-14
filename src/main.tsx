@@ -43,7 +43,8 @@ function App() {
   const [slug, setSlug] = useState<string | null>(null)
   const [name, setName] = useState('')
   const [error, setError] = useState('')
-  useEffect(() => void api('/projects').then(setProjects), [slug])
+  const [folder, setFolder] = useState('') // projects folder; changing it reloads the list
+  useEffect(() => void api('/projects').then(setProjects), [slug, folder])
 
   if (slug) return <ProjectView slug={slug} onClose={() => setSlug(null)} />
   const create = () =>
@@ -59,7 +60,41 @@ function App() {
         <button onClick={create} disabled={!name.trim()}>Create</button>
       </p>
       {error && <p className="error">{error}</p>}
+      <Settings onFolder={setFolder} />
     </main>
+  )
+}
+
+type AppSettings = { projectsDir: string; locked: boolean; packaged: boolean }
+
+function Settings({ onFolder }: { onFolder: (dir: string) => void }) {
+  const [settings, setSettings] = useState<AppSettings>()
+  const [dir, setDir] = useState('')
+  const [message, setMessage] = useState('')
+  const [stopped, setStopped] = useState(false)
+  const loaded = (s: AppSettings) => { setSettings(s); setDir(s.projectsDir); onFolder(s.projectsDir) }
+  useEffect(() => void api('/settings').then(loaded), [])
+  if (stopped) return <p className="stopped">Writing Tool has stopped. You can close this tab; open the app again to keep writing.</p>
+  if (!settings) return null
+  const save = () => api('/settings', 'PUT', { projectsDir: dir }).then((s) => { loaded(s); setMessage('Now using this folder.') }, (e) => setMessage(e.message))
+  return (
+    <section className="settings">
+      <h3>Settings</h3>
+      <label>
+        Projects folder
+        <input aria-label="Projects folder" value={dir} disabled={settings.locked} onChange={(e) => setDir(e.target.value)} />
+      </label>
+      <button onClick={save} disabled={settings.locked || !dir.trim() || dir === settings.projectsDir}>Use this folder</button>
+      <p className="muted">
+        Each project is a folder of Markdown files in here (a synced folder like Dropbox or OneDrive works).
+        Switching folders doesn't move your projects: copy their folders across yourself.
+      </p>
+      {settings.locked && <p className="muted">Set by the PROJECTS_DIR environment variable.</p>}
+      {message && <p>{message}</p>}
+      {settings.packaged && (
+        <p><button onClick={() => api('/quit', 'POST').then(() => setStopped(true), (e) => setMessage(e.message))}>Quit Writing Tool</button></p>
+      )}
+    </section>
   )
 }
 

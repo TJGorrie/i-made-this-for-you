@@ -142,3 +142,15 @@ test('writing log: one bar per day, unopened days shown as zero', async ({ page 
   await expect(page.locator('.writing-log tr')).toHaveText([`${day(0)}0`, `${day(-1)}0`, `${day(-2)}12`])
   await page.screenshot({ path: 'test-results/log.png' })
 })
+
+test('settings: shows the projects folder (fixed by PROJECTS_DIR in tests), no Quit outside the standalone app', async ({ page }) => {
+  await page.goto('/')
+  const folder = page.getByLabel('Projects folder')
+  await expect(folder).toHaveValue(/writing-tool-e2e/)
+  await expect(folder).toBeDisabled()
+  await expect(page.getByText('Set by the PROJECTS_DIR environment variable.')).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Quit Writing Tool' })).toHaveCount(0)
+  // Other websites can't use the API.
+  const res = await page.request.post('/api/projects', { data: { name: 'evil' }, headers: { origin: 'http://evil.example' } })
+  expect(res.status()).toBe(403)
+})

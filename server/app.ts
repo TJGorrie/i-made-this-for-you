@@ -17,12 +17,13 @@ import { marked } from 'marked'
 import { createHash } from 'node:crypto'
 import { RESERVED_FIELDS, reviewNotes } from '../src/api.ts'
 import { setInline } from './review.ts'
+import { locked, packaged, projectsDir, setProjectsDir } from './settings.ts'
 
 // Same as fingerprint() in src/api.ts: sha-256 of the field's JSON.
 const fingerprint = (v: unknown) => createHash('sha256').update(JSON.stringify(v ?? null)).digest('hex')
 
-const ROOT = path.resolve(process.env.PROJECTS_DIR ?? path.join(import.meta.dirname, '..', 'projects'))
-const indexes = new Map<string, DatabaseSync>()
+let ROOT = projectsDir()
+const indexes = new Map<string, { db: DatabaseSync; watcher: fs.FSWatcher }>()
 // Manuscript hierarchy: which type each type must sit under.
 const PARENT_TYPE: Record<string, string> = { chapter: 'book', scene: 'chapter' }
 
@@ -30,13 +31,13 @@ function project(slug: string) {
   const dir = path.join(ROOT, slug)
   if (!/^[a-z0-9-]+$/.test(slug) || !fs.existsSync(path.join(dir, 'project.json')))
     throw new HTTPException(404, { message: 'No such project' })
-  let db = indexes.get(slug)
-  if (!db) {
-    db = openIndex(dir)
-    watchProject(db, dir)
-    indexes.set(slug, db)
+  let open = indexes.get(slug)
+  if (!open) {
+    const db = openIndex(dir)
+    open = { db, watcher: watchProject(db, dir) }
+    indexes.set(slug, open)
   }
-  return { dir, db }
+  return { dir, db: open.db }
 }
 
 type Row = { id: string; type: string; title: string; path: string }
@@ -51,6 +52,38 @@ const children = (db: DatabaseSync, parent: string) =>
     order by json_extract(fields, '$.order')`).all(parent) as Row[]
 
 export const app = new Hono().basePath('/api')
+
+// Only this app's own page may call the API. Other websites can't (no cross-site form posts or fetches),
+// and neither can a page reached through another hostname that points at this machine (DNS rebinding).
+app.use(async (c, next) => {
+  const host = c.req.header('host') ?? ''
+  const origin = c.req.header('origin')
+  if (!/^(127\.0\.0\.1|localhost)(:\d+)?$/.test(host) || (origin && origin !== `http://${host}`))
+    throw new HTTPException(403, { message: 'Requests must come from the app itself' })
+  await next()
+})
+
+// ---- Settings ----
+
+app.get('/settings', (c) => c.json({ projectsDir: ROOT, locked, packaged }))
+
+app.put('/settings', async (c) => {
+  if (locked) throw new HTTPException(409, { message: 'The projects folder is set by PROJECTS_DIR' })
+  const { projectsDir: dir } = await c.req.json()
+  if (typeof dir !== 'string' || !dir.trim()) throw new HTTPException(400, { message: 'Folder required' })
+  await setProjectsDir(dir.trim()).catch((e) => { throw new HTTPException(400, { message: e.message }) })
+  for (const { db, watcher } of indexes.values()) { watcher.close(); db.close() }
+  indexes.clear()
+  ROOT = projectsDir()
+  return c.json({ projectsDir: ROOT, locked, packaged })
+})
+
+// The standalone app has no window of its own to close (on a Mac it runs in the background).
+app.post('/quit', (c) => {
+  if (!packaged) throw new HTTPException(404, { message: 'Only the standalone app can be quit from here' })
+  setTimeout(() => process.exit(0), 100) // after the reply is out
+  return c.body(null, 204)
+})
 
 app.get('/projects', (c) => c.json(listProjects(ROOT)))
 
