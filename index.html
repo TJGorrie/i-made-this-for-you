@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Writing Tool</title>
+    <title>IMadeThisForYou</title>
     <style>
       /* Colours as tokens: light-dark(light, dark) follows color-scheme, which the theme toggle overrides. */
       :root {
@@ -170,7 +170,7 @@
       .review-items q { color: var(--muted); font-style: italic; }
       .review-items li.done > .link, .review-items li.done > span { text-decoration: line-through; color: var(--muted); }
       /* Open comments as boxes in a column right of the text (only when there are some).
-         ponytail: no narrow-screen layout; boxes squeeze the text below ~700px. */
+         improvement: no narrow-screen layout; boxes squeeze the text below ~700px. */
       .editor:has(.margin-note) { max-width: calc(42em + 250px); }
       .prose-wrap { position: relative; }
       .prose-wrap:has(.margin-note) { padding-right: 250px; }
@@ -181,6 +181,16 @@
         padding: 4px 8px; font-size: 13px; cursor: pointer; box-shadow: 0 1px 3px var(--shadow); transition: top .15s; }
       .margin-note:hover { background: var(--hover); }
       .review-view { max-width: 46em; }
+      /* (?) help tips next to view headings: shown on hover or keyboard focus. */
+      .help { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px;
+        margin-left: 6px; vertical-align: middle; border: 1px solid var(--border-2); border-radius: 50%; color: var(--muted);
+        font: 600 12px/1 system-ui, sans-serif; cursor: help; }
+      .help:hover, .help:focus-visible { color: var(--accent); border-color: var(--accent); outline: none; }
+      .help-text { display: none; position: absolute; z-index: 30; top: calc(100% + 6px); left: -8px; width: min(380px, 80vw);
+        padding: 8px 12px; background: var(--panel); color: var(--text-2); border: 1px solid var(--border-2); border-radius: 4px;
+        box-shadow: 0 4px 12px var(--shadow); font: 400 13px/1.5 system-ui, sans-serif; text-align: left; cursor: auto; }
+      .help-text > span { display: block; margin: 0 0 6px; } .help-text > span:last-child { margin-bottom: 0; }
+      .help:hover .help-text, .help:focus .help-text { display: block; }
       .settings { margin-top: 32px; padding-top: 8px; border-top: 1px solid var(--border); max-width: 40em; }
       .settings label { display: block; color: var(--text-2); }
       .settings input { display: block; width: 100%; margin: 4px 0 8px; }

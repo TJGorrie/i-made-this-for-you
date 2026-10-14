@@ -12,11 +12,11 @@ import {
 } from './history.ts'
 import { localDate, readGoals, recordDay, streak, writeGoals } from './goals.ts'
 import { backlinks, indexFile, openIndex, reindexFolder, removePath, resolveLinks, search, stripComments, watchProject } from './indexer.ts'
-import { spawnSync } from 'node:child_process'
 import { marked } from 'marked'
 import { createHash } from 'node:crypto'
 import { RESERVED_FIELDS, reviewNotes } from '../src/api.ts'
 import { setInline } from './review.ts'
+import { docx, epub, type Book } from './export.ts'
 import { locked, packaged, projectsDir, setProjectsDir } from './settings.ts'
 
 // Same as fingerprint() in src/api.ts: sha-256 of the field's JSON.
@@ -365,20 +365,21 @@ app.put('/projects/:p/goals', async (c) => {
 })
 
 // Whole book: chapters as headings, scenes separated by * * *, comments and link markup removed.
-// ?format=md (default) | html (printable: the browser's "Save as PDF") | docx | epub (these two need pandoc).
-const EXPORT_TYPES: Record<string, string> = {
-  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-  epub: 'application/epub+zip',
+// ?format=md (default) | html (printable: the browser's "Save as PDF") | docx | epub (written by server/export.ts).
+const EXPORTS: Record<string, [type: string, write: (b: Book) => Buffer]> = {
+  docx: ['application/vnd.openxmlformats-officedocument.wordprocessingml.document', docx],
+  epub: ['application/epub+zip', epub],
 }
 
 app.get('/projects/:p/books/:id/compile', (c) => {
   const { dir, db } = project(c.req.param('p'))
   const book = row(db, c.req.param('id'))
+  const chapters = children(db, book.id).map((ch) => ({
+    title: ch.title,
+    scenes: children(db, ch.id).map((s) => resolveLinks(db, stripComments(readEntity(path.join(dir, s.path)).body)).trim()),
+  }))
   let md = `# ${book.title}\n`
-  for (const ch of children(db, book.id)) {
-    const scenes = children(db, ch.id).map((s) => resolveLinks(db, stripComments(readEntity(path.join(dir, s.path)).body)).trim())
-    md += `\n## ${ch.title}\n\n${scenes.join('\n\n* * *\n\n')}\n`
-  }
+  for (const ch of chapters) md += `\n## ${ch.title}\n\n${ch.scenes.join('\n\n* * *\n\n')}\n`
   const name = slugify(book.title)
   const format = c.req.query('format') ?? 'md'
   if (format === 'md')
@@ -389,13 +390,10 @@ app.get('/projects/:p/books/:id/compile', (c) => {
 <style>body{font:12pt/1.6 Georgia,serif;max-width:36em;margin:2em auto;padding:0 1em}h2{break-before:page}hr{border:0;text-align:center}hr::after{content:'* * *'}</style>
 ${marked.parse(md, { async: false })}<script>print()</script>`)
   }
-  if (!EXPORT_TYPES[format]) throw new HTTPException(400, { message: 'Unknown format' })
-  // ponytail: synchronous pandoc call blocks the server during conversion (a second or two for a novel); fine for one user.
-  const out = spawnSync('pandoc', ['-f', 'markdown', '-t', format, '-o', '-', '--metadata', `title=${book.title}`],
-    { input: md, maxBuffer: 512 * 1024 * 1024 })
-  if (out.error) throw new HTTPException(501, { message: 'Word and EPUB export need pandoc: install it from pandoc.org, then restart the app.' })
-  if (out.status !== 0) throw new HTTPException(500, { message: `pandoc failed: ${out.stderr}` })
-  return c.body(out.stdout, 200, { 'content-type': EXPORT_TYPES[format], 'content-disposition': `attachment; filename="${name}.${format}"` })
+  if (!EXPORTS[format]) throw new HTTPException(400, { message: 'Unknown format' })
+  const [type, write] = EXPORTS[format]
+  return c.body(new Uint8Array(write({ title: book.title, chapters })), 200,
+    { 'content-type': type, 'content-disposition': `attachment; filename="${name}.${format}"` })
 })
 
 // Timeline calendar: month names and an era label, stored in project.json.

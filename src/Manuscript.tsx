@@ -46,7 +46,7 @@ export function Manuscript({ slug, rows, selected, onSelect, refresh }: Props) {
     if (drag.type === target.type) {
       const sibs = siblings(target).filter((s) => s.id !== drag.id)
       const prev = sibs[sibs.indexOf(target) - 1]
-      // ponytail: fractional order means one file write per move; renumber siblings if ~50 drops into the same gap ever exhaust float precision.
+      // improvement: fractional order means one file write per move; renumber siblings if ~50 drops into the same gap ever exhaust float precision.
       order = prev ? ((prev.order ?? 0) + (target.order ?? 0)) / 2 : (target.order ?? 0) - 1
     } else if ((drag.type === 'scene' && target.type === 'chapter') || (drag.type === 'chapter' && target.type === 'book')) {
       parent = target.id
@@ -80,8 +80,8 @@ export function Manuscript({ slug, rows, selected, onSelect, refresh }: Props) {
           onChange={(e) => { open(`/api/projects/${slug}/books/${r.id}/compile?format=${e.target.value}`); e.target.value = '' }}>
           <option value="">⇩</option>
           <option value="md">Markdown</option>
-          <option value="docx">Word (needs pandoc)</option>
-          <option value="epub">EPUB (needs pandoc)</option>
+          <option value="docx">Word</option>
+          <option value="epub">EPUB</option>
           <option value="html">PDF (print)</option>
         </select>
       )}

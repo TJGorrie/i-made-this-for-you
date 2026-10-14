@@ -151,11 +151,13 @@ test('review mode: text read-only, comments boxed in the margin beside their pas
   // Focus mode hides them.
   await page.getByRole('button', { name: 'Focus', exact: true }).click()
   await expect(notes.first()).toBeHidden()
+  await expect(page.getByRole('button', { name: 'Comment', exact: true })).toBeHidden()
+  await expect(page.getByRole('button', { name: 'Review', exact: true })).toBeHidden()
   await page.keyboard.press('Escape')
   await expect(notes.first()).toBeVisible()
 
-  // Leaving review mode: editable again, comments still beside the text.
-  await page.getByRole('button', { name: 'Review', exact: true }).click()
+  // Focus mode also left review mode (its button was hidden): editable again, comments still beside the text.
+  await expect(page.getByRole('button', { name: 'Review', exact: true })).toHaveAttribute('aria-pressed', 'false')
   await expect(notes).toHaveText(['vague', 'which door?'])
   await page.locator('.ProseMirror p').last().click()
   await page.keyboard.press('Control+End')

@@ -1,6 +1,7 @@
 // "Today" word count against a daily goal, with streak. Refreshes whenever the entity list does (after saves).
 import { useEffect, useState } from 'react'
 import { api, type Row } from './api.ts'
+import { Help } from './Help.tsx'
 
 type Day = { date: string; words: number }
 type Stats = { total: number; today: number; daily: number | null; streak: number; days: Day[] }
@@ -54,7 +55,11 @@ export function WritingLog({ slug }: { slug: string }) {
   const written = days.reduce((n, d) => n + Math.max(0, d.words), 0)
   return (
     <div className="writing-log">
-      <h2>Writing log</h2>
+      <h2>Writing log <Help>
+        <span>How many words you wrote each day, counting scenes only. Deleting text counts against the day, so it's your net progress.</span>
+        <span>Set a daily goal with <b>set goal</b> at the top of the sidebar; it shows as a dashed line here, and meeting it day after day builds a streak.
+          Hover a bar for that day's numbers.</span>
+      </Help></h2>
       <p className="muted">
         {days.length} days · {written.toLocaleString()} words written
         {stats.daily ? ` · goal met on ${days.filter((d) => d.words >= stats.daily!).length}` : ''}

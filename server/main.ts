@@ -39,14 +39,14 @@ const openBrowser = () => {
 }
 
 const server = serve({ fetch: app.fetch, port, hostname: '127.0.0.1' }, () => {
-  console.log(`Writing tool running at ${url}`)
+  console.log(`IMadeThisForYou running at ${url}`)
   if (packaged) {
     console.log('Keep this window open while you write; use Quit on the projects page (or close this window) to stop.')
     openBrowser()
   }
 })
 // Started twice (double-clicked again): the app is already running, so just show it.
-// ponytail: assumes whatever holds the port is this app; a setting for the port if that ever clashes.
+// improvement: assumes whatever holds the port is this app; a setting for the port if that ever clashes.
 server.on('error', (err: NodeJS.ErrnoException) => {
   if (err.code !== 'EADDRINUSE' || !packaged) throw err
   openBrowser()

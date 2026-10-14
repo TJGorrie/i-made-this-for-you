@@ -10,6 +10,8 @@ import { recordDay, streak, type Goals } from './goals.ts'
 import { calendarLabel, compareDates, linkText } from '../src/api.ts'
 import { reviewItems, setInline } from './review.ts'
 import { stripComments } from './indexer.ts'
+import { docx, epub } from './export.ts'
+import { inflateRawSync, crc32 } from 'node:zlib'
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'writing-tool-'))
 try {
@@ -46,6 +48,31 @@ try {
   assert.equal(linkText('Strider', 'Aragorn', ['Strider']), 'Strider')
   assert.equal(linkText('strider', 'Aragorn', ['Strider']), 'strider')
   assert.equal(linkText('Old Name', 'Aragorn', ['Strider']), 'Aragorn')
+
+  // Export: Word and EPUB are valid zips (every entry's CRC checks out) holding the text, escaped.
+  const unzip = (buf: Buffer) => {
+    const files: Record<string, string> = {}
+    for (let at = 0; buf.readUInt32LE(at) === 0x04034b50;) { // local file headers, in order
+      const start = at + 30 + buf.readUInt16LE(at + 26)
+      const body = buf.subarray(start, start + buf.readUInt32LE(at + 18))
+      const data = buf.readUInt16LE(at + 8) ? inflateRawSync(body) : body
+      assert.equal(data.length, buf.readUInt32LE(at + 22))
+      assert.equal(crc32(data), buf.readUInt32LE(at + 14))
+      files[buf.toString('utf8', at + 30, start)] = data.toString('utf8')
+      at = start + body.length
+    }
+    return files
+  }
+  const book = { title: 'Ash & Ember', chapters: [{ title: 'Gate', scenes: ['A **b** *c*.', 'Next <scene>.'] }] }
+  const word = unzip(docx(book))
+  const paragraphs = [...word['word/document.xml'].matchAll(/<w:p>([\s\S]*?)<\/w:p>/g)].map((p) =>
+    [...p[1].matchAll(/<w:t[^>]*>([^<]*)<\/w:t>/g)].map((t) => t[1]).join(''))
+  assert.deepEqual(paragraphs, ['Ash &#38; Ember', 'Gate', 'A b c.', '* * *', 'Next &#60;scene&#62;.']) // angle brackets kept as typed
+  assert.match(word['word/document.xml'], /<w:b\/><\/w:rPr><w:t xml:space="preserve">b</)
+  const book2 = unzip(epub(book))
+  assert.equal(Object.keys(book2)[0], 'mimetype') // first and stored, as EPUB requires
+  assert.equal(book2.mimetype, 'application/epub+zip')
+  assert.match(book2['OEBPS/chapter-1.xhtml'], /<h2>Gate<\/h2>\n<p>A <strong>b<\/strong> <em>c<\/em>\.<\/p>\n<p class="break">/)
 
   // Timeline dates: plain numbers and year-month-day sort together; calendar labels.
   const dates = ['300-3-12', 'Undated', '-12.5', '300', '300-3-2', '299-12']

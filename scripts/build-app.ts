@@ -1,5 +1,5 @@
 // Run: npm run build:app. Builds the standalone app for the OS it runs on (CI runs it on each), into release/:
-//   Windows: Writing-Tool-windows-x64.exe   macOS: Writing-Tool-macos-<arch>.zip (Writing Tool.app)   Linux: Writing-Tool-linux-<arch>.tar.gz
+//   Windows: IMadeThisForYou-windows-x64.exe   macOS: IMadeThisForYou-macos-<arch>.zip (IMadeThisForYou.app)   Linux: IMadeThisForYou-linux-<arch>.tar.gz
 // It's a Node single executable (nodejs.org/api/single-executable-applications.html): this Node binary with the
 // bundled server and the built UI embedded, so people need nothing installed.
 import fs from 'node:fs'
@@ -38,7 +38,7 @@ run(process.execPath, '--experimental-sea-config', config)
 // 3. A copy of this Node with the blob injected. macOS: the copy's signature is removed first and redone after
 //    (ad-hoc; Apple Silicon won't run unsigned code).
 const mac = process.platform === 'darwin'
-const bin = path.join(out, process.platform === 'win32' ? 'writing-tool.exe' : 'writing-tool')
+const bin = path.join(out, process.platform === 'win32' ? 'imadethisforyou.exe' : 'imadethisforyou')
 fs.copyFileSync(process.execPath, bin)
 fs.chmodSync(bin, 0o755)
 if (mac) run('codesign', '--remove-signature', bin)
@@ -49,26 +49,26 @@ await inject(bin, 'NODE_SEA_BLOB', fs.readFileSync(path.join(out, 'app.blob')), 
 // 4. Package it.
 const arch = process.arch
 if (process.platform === 'win32') {
-  fs.copyFileSync(bin, path.join(release, `Writing-Tool-windows-${arch}.exe`))
+  fs.copyFileSync(bin, path.join(release, `IMadeThisForYou-windows-${arch}.exe`))
 } else if (mac) {
   // A background app (LSUIElement): no Dock icon or window of its own; the UI is the browser tab, Quit is on the projects page.
-  const app = path.join(out, 'Writing Tool.app')
+  const app = path.join(out, 'IMadeThisForYou.app')
   fs.mkdirSync(path.join(app, 'Contents', 'MacOS'), { recursive: true })
-  fs.renameSync(bin, path.join(app, 'Contents', 'MacOS', 'writing-tool'))
+  fs.renameSync(bin, path.join(app, 'Contents', 'MacOS', 'imadethisforyou'))
   fs.writeFileSync(path.join(app, 'Contents', 'Info.plist'), `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
-  <key>CFBundleExecutable</key><string>writing-tool</string>
-  <key>CFBundleIdentifier</key><string>app.writing-tool</string>
-  <key>CFBundleName</key><string>Writing Tool</string>
+  <key>CFBundleExecutable</key><string>imadethisforyou</string>
+  <key>CFBundleIdentifier</key><string>app.imadethisforyou</string>
+  <key>CFBundleName</key><string>IMadeThisForYou</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>${JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version ?? '0.0.0'}</string>
   <key>LSUIElement</key><true/>
 </dict></plist>
 `)
   run('codesign', '--sign', '-', '--force', '--deep', app)
-  run('ditto', '-c', '-k', '--keepParent', app, path.join(release, `Writing-Tool-macos-${arch}.zip`))
+  run('ditto', '-c', '-k', '--keepParent', app, path.join(release, `IMadeThisForYou-macos-${arch}.zip`))
 } else {
-  run('tar', '-czf', path.join(release, `Writing-Tool-linux-${arch}.tar.gz`), '-C', out, 'writing-tool')
+  run('tar', '-czf', path.join(release, `IMadeThisForYou-linux-${arch}.tar.gz`), '-C', out, 'imadethisforyou')
 }
 console.log('Built:', fs.readdirSync(release).join(', '))

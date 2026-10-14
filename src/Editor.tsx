@@ -200,10 +200,10 @@ function Form({ initial, url, fields: specs, targets, onSaved, onDeleted, onOpen
       <div className="statusbar">
         <button className="link type-link" onClick={() => onOpenType(values.type)}>{values.type}</button>
         <small>{status}</small>
-        {onFocusMode && <button className="mini focus-hide" onClick={onFocusMode} title="Hide everything but the text (Esc to leave)">Focus</button>}
+        {onFocusMode && <button className="mini focus-hide" onClick={() => { setReviewing(false); onFocusMode() }} title="Hide everything but the text (Esc to leave)">Focus</button>}
         {/* preventDefault on mousedown: the click mustn't take focus (and the selection) away from the text. */}
-        <button className="mini" onMouseDown={(e) => e.preventDefault()} onClick={comment} title="Comment on the selected text (or edit the comment under the cursor)">Comment</button>
-        <button className="mini" onClick={() => setReviewing((r) => !r)} aria-pressed={reviewing}
+        <button className="mini focus-hide" onMouseDown={(e) => e.preventDefault()} onClick={comment} title="Comment on the selected text (or edit the comment under the cursor)">Comment</button>
+        <button className="mini focus-hide" onClick={() => setReviewing((r) => !r)} aria-pressed={reviewing}
           title="Review mode: make the text read-only while you go through comments">Review</button>
         <button className="mini focus-hide" onClick={() => setShowHistory((s) => !s)} aria-pressed={showHistory}>History</button>
         <button className="mini focus-hide" onClick={remove}>Delete</button>

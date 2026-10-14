@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react'
 import cytoscape from 'cytoscape'
 import type { Relationship, Row } from './api.ts'
 import type { LinkTarget } from './wikiLink.ts'
+import { Help } from './Help.tsx'
 
 type ListProps = { value: unknown; targets: LinkTarget[]; onChange: (v: Relationship[]) => void }
 
@@ -76,7 +77,13 @@ export function Graph({ rows, onOpen }: { rows: Row[]; onOpen: (id: string) => v
 
   return (
     <div className="graph-view">
-      <h2>Relationships</h2>
+      <h2>Relationships <Help>
+        <span>A map of how your wiki entries are connected. Each line is a relationship, with its arrow pointing from one entry to the other.</span>
+        <span>Add one in any wiki entry (a character, place, faction…): <b>+ relationship</b>, type what it is ("brother of", "lives in"),
+          and pick who or what it's to.</span>
+        <span><b>Only…</b> keeps relationships whose name matches, e.g. <code>parent|child|married</code> for a family tree.
+          <b>Tree layout</b> stacks them top to bottom ("A parent of B" puts A above B). Click a dot to open that entry.</span>
+      </Help></h2>
       <p>
         <input aria-label="Only relationships matching" placeholder="Only… e.g. parent|child|married" value={only}
           onChange={(e) => setOnly(e.target.value)} />{' '}

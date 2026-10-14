@@ -16,12 +16,12 @@ const configBase =
   : process.platform === 'darwin' ? path.join(home, 'Library', 'Application Support')
   : process.env.XDG_CONFIG_HOME ?? path.join(home, '.config')
 // Running from source keeps its own settings, so `npm run dev` never switches to the app's folder (or back).
-const file = path.join(configBase, packaged ? 'Writing Tool' : 'Writing Tool (dev)', 'settings.json')
+const file = path.join(configBase, packaged ? 'IMadeThisForYou' : 'IMadeThisForYou (dev)', 'settings.json')
 
 type Settings = { projectsDir?: string }
 const read = (): Settings => { try { return JSON.parse(fs.readFileSync(file, 'utf8')) } catch { return {} } }
 
-const defaultDir = () => (packaged ? path.join(home, 'Documents', 'Writing Tool') : path.join(import.meta.dirname, '..', 'projects'))
+const defaultDir = () => (packaged ? path.join(home, 'Documents', 'IMadeThisForYou') : path.join(import.meta.dirname, '..', 'projects'))
 export const projectsDir = () => path.resolve(process.env.PROJECTS_DIR ?? read().projectsDir ?? defaultDir())
 
 // Checks the folder is usable (creating it if needed) before saving it. Throws a message for the user.

@@ -92,3 +92,26 @@ test('map: upload image, place, open and remove pins', async ({ page }) => {
   await expect(page.locator('.statusbar')).toContainText('Saved')
   expect(readFile(`${slug}/wiki/map/world.md`)).toContain('pins: []')
 })
+
+test('timeline: help tip, and "involves" makes an event filterable by who is in it', async ({ page }) => {
+  const { post, P, open } = await setup(page, 'timeline-help')
+  await post(P, { type: 'event', title: 'Storm', date: '12', body: '' })
+  await open()
+  await page.getByRole('button', { name: 'Timeline', exact: true }).click()
+  await expect(page.getByText("fill in an event's involves or tags field")).toBeVisible()
+  const tip = page.locator('.timeline h2 .help')
+  await expect(tip.getByRole('tooltip')).toBeHidden()
+  await tip.hover()
+  await expect(tip.getByRole('tooltip')).toContainText('involves')
+  await page.screenshot({ path: 'test-results/timeline-help.png' })
+  await page.mouse.move(0, 0)
+  await expect(tip.getByRole('tooltip')).toBeHidden()
+
+  // Pick Ana in the event's involves field → she's in the filter, and filtering shows the event.
+  await page.locator('.timeline').getByRole('button', { name: 'Storm' }).click()
+  await page.getByLabel('involves').selectOption({ label: 'Ana (character)' })
+  await expect(page.locator('.statusbar')).toContainText('Saved')
+  await page.getByRole('button', { name: 'Timeline', exact: true }).click()
+  await page.getByLabel('Filter by').selectOption({ label: 'Ana' })
+  await expect(page.locator('.timeline li')).toHaveText([/Storm/])
+})

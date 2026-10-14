@@ -45,7 +45,7 @@ export const linkText = (stored: string, title: string, aliases: string[]) =>
   aliases.some((a) => a.toLowerCase() === stored.toLowerCase()) ? stored : title
 
 // Fingerprint of a field value (sha-256 of its JSON, same as the server) to detect edits made elsewhere.
-// ponytail: crypto.subtle needs a secure context (localhost is fine); a LAN mode over plain http would need https or a JS hash.
+// improvement: crypto.subtle needs a secure context (localhost is fine); a LAN mode over plain http would need https or a JS hash.
 export const fingerprint = async (v: unknown) =>
   [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(JSON.stringify(v ?? null))))]
     .map((b) => b.toString(16).padStart(2, '0')).join('')

@@ -10,6 +10,8 @@ export default defineConfig({
       name: 'api',
       configureServer(server) {
         const api = getRequestListener(app.fetch)
+        // Node closes idle keep-alive connections after 5s, which can race a client reusing one (ECONNRESET in tests).
+        if (server.httpServer) (server.httpServer as import('node:http').Server).keepAliveTimeout = 60_000
         server.middlewares.use((req, res, next) => (req.url?.startsWith('/api/') ? api(req, res) : next()))
       },
     },

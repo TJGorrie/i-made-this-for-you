@@ -4,6 +4,7 @@ import { useEditorState, type Editor } from '@tiptap/react'
 import { api, MANUSCRIPT_TYPES, type ReviewNote, type Row } from './api.ts'
 import { commentRanges } from './comment.ts'
 import { manuscriptTree } from './Manuscript.tsx'
+import { Help } from './Help.tsx'
 
 // What the inline input adds or edits: a comment on a range, or (no range) a note on the whole entity.
 export type Draft = { from: number; to: number; note: string; done: boolean } | { from?: undefined; note: string }
@@ -146,7 +147,13 @@ export function ReviewView({ slug, rows, review, onOpen, refresh }: {
       .then(() => { setError(''); refresh() }, (e) => setError(e.message))
   return (
     <div className="review-view">
-      <h2>Review <small className="muted">{openCount(review)} open</small></h2>
+      <h2>Review <small className="muted">{openCount(review)} open</small> <Help>
+        <span>Your to-do list of edits, across the whole project: book order first, then the wiki.</span>
+        <span>Add them in an entry: select text and click <b>Comment</b> for a note on that passage, or <b>+ Note</b> in its Review box for
+          a note on the whole entry.</span>
+        <span>Tick an item when it's dealt with; it stays (marked done) so you can re-open it with <b>show done</b>.
+          Click an item to open it, with the passage selected.</span>
+      </Help></h2>
       <label><input type="checkbox" checked={showDone} onChange={(e) => setShowDone(e.target.checked)} /> show done</label>
       {error && <p className="error">{error}</p>}
       {ordered.map(({ row, depth }) => {

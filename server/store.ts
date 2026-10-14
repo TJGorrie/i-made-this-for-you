@@ -23,7 +23,7 @@ const DEFAULT_TEMPLATES = {
   item: ['owner:character', 'origin'],
   faction: ['leader:character', 'goals'],
   lore: ['category'],
-  event: ['date', 'dateLabel', 'tags'],
+  event: ['date', 'dateLabel', 'involves:*[]', 'tags'],
   map: ['image'],
 }
 

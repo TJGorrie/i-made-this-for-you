@@ -1,6 +1,7 @@
 // Edit templates.json from the app: types, their fields, and which fields link to other entries.
 import { useState } from 'react'
 import { api, MANUSCRIPT_TYPES, parseField } from './api.ts'
+import { Help } from './Help.tsx'
 
 type Kind = 'text' | 'link' | 'links' | 'image' | 'images'
 type Field = { name: string; kind: Kind; target: string }
@@ -52,7 +53,11 @@ export function TemplateEditor({ slug, templates, onSaved }: Props) {
 
   return (
     <div className="templates">
-      <h2>Templates</h2>
+      <h2>Templates <Help>
+        <span>The fields each type of entry gets (character, location, event…). Add a type to get a new section in the wiki.</span>
+        <span>A field can hold plain text, or links: <code>pov:character</code> picks one character, <code>appears:character[]</code> several,
+          <code>mentioned:*[]</code> any wiki entries. <code>portrait:image</code> holds a picture, <code>gallery:image[]</code> several.</span>
+      </Help></h2>
       <p className="muted">
         The fields each type of entry gets. Renaming a field doesn't move values already saved under the old name;
         they stay in the file and show as extra fields.

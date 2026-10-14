@@ -149,7 +149,7 @@ test('settings: shows the projects folder (fixed by PROJECTS_DIR in tests), no Q
   await expect(folder).toHaveValue(/writing-tool-e2e/)
   await expect(folder).toBeDisabled()
   await expect(page.getByText('Set by the PROJECTS_DIR environment variable.')).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Quit Writing Tool' })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Quit IMadeThisForYou' })).toHaveCount(0)
   // Other websites can't use the API.
   const res = await page.request.post('/api/projects', { data: { name: 'evil' }, headers: { origin: 'http://evil.example' } })
   expect(res.status()).toBe(403)

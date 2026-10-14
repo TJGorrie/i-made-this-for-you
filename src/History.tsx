@@ -1,6 +1,7 @@
 // Version history for one entity, and the project's "Deleted items" list.
 import { useEffect, useState } from 'react'
 import { api, fieldText, RESERVED_FIELDS, type Entity } from './api.ts'
+import { Help } from './Help.tsx'
 
 type Snapshot = { ts: number; size: number }
 
@@ -64,7 +65,10 @@ export function DeletedItems({ slug, onRestored }: { slug: string; onRestored: (
 
   return (
     <div className="deleted-items">
-      <h2>Deleted items</h2>
+      <h2>Deleted items <Help>
+        <span>Everything you've deleted, newest first. <b>Restore</b> brings it back where it was (or unfiled, if its chapter is gone).</span>
+        <span>For an older version of something that still exists, open it and click <b>History</b>.</span>
+      </Help></h2>
       {info && (
         <p className="muted">
           Version history uses {formatBytes(info.bytes)} of {formatBytes(info.maxBytes)}.

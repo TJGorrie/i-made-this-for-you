@@ -1,6 +1,6 @@
 // Inline comment on a stretch of text, saved as CriticMarkup: {==commented text==}{>>the note<<}.
 // A ticked-off comment keeps its mark with a [x] prefix on the note ({>>[x] the note<<}), so it can be re-opened.
-// ponytail: an @-link inside a commented stretch falls outside the comment on save (text kept); fine for notes.
+// improvement: an @-link inside a commented stretch falls outside the comment on save (text kept); fine for notes.
 import { Mark } from '@tiptap/core'
 import type { Node } from '@tiptap/pm/model'
 import { parseNote } from './api.ts'

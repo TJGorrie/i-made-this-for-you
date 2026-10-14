@@ -74,7 +74,7 @@ function Settings({ onFolder }: { onFolder: (dir: string) => void }) {
   const [stopped, setStopped] = useState(false)
   const loaded = (s: AppSettings) => { setSettings(s); setDir(s.projectsDir); onFolder(s.projectsDir) }
   useEffect(() => void api('/settings').then(loaded), [])
-  if (stopped) return <p className="stopped">Writing Tool has stopped. You can close this tab; open the app again to keep writing.</p>
+  if (stopped) return <p className="stopped">IMadeThisForYou has stopped. You can close this tab; open the app again to keep writing.</p>
   if (!settings) return null
   const save = () => api('/settings', 'PUT', { projectsDir: dir }).then((s) => { loaded(s); setMessage('Now using this folder.') }, (e) => setMessage(e.message))
   return (
@@ -92,7 +92,7 @@ function Settings({ onFolder }: { onFolder: (dir: string) => void }) {
       {settings.locked && <p className="muted">Set by the PROJECTS_DIR environment variable.</p>}
       {message && <p>{message}</p>}
       {settings.packaged && (
-        <p><button onClick={() => api('/quit', 'POST').then(() => setStopped(true), (e) => setMessage(e.message))}>Quit Writing Tool</button></p>
+        <p><button onClick={() => api('/quit', 'POST').then(() => setStopped(true), (e) => setMessage(e.message))}>Quit IMadeThisForYou</button></p>
       )}
     </section>
   )

@@ -2,6 +2,7 @@
 // Filter by an entity the events link to, or by tag.
 import { useEffect, useState } from 'react'
 import { api, calendarLabel, compareDates, fieldText, type Calendar, type Row } from './api.ts'
+import { Help } from './Help.tsx'
 
 type Props = {
   slug: string; rows: Row[]; calendar?: Calendar
@@ -30,7 +31,15 @@ export function Timeline({ slug, rows, calendar, onOpen, onCreate, onCalendar }:
 
   return (
     <div className="timeline">
-      <h2>Timeline</h2>
+      <h2>Timeline <Help>
+        <span>Every <b>event</b> entry, in date order. Make one with <b>New event</b> (or + next to "event" in the sidebar).</span>
+        <span><b>date</b> sets the order: a year like <code>300</code> or <code>-12</code>, or year-month-day like <code>300-3-12</code>.
+          Events without one go last. <b>dateLabel</b> is optional text shown instead, e.g. "The Long Winter".</span>
+        <span><b>Filtering:</b> the menu lists the characters, places and other entries your events involve, and their tags.
+          To add someone, pick them in the event's <b>involves</b> field (or @-mention them in its text).
+          For themes, write <b>tags</b> like <code>war, politics</code>.</span>
+        <span><b>Calendar:</b> name your world's months and era, so <code>300-3-12</code> shows as "12 Frostmoon, Year 300".</span>
+      </Help></h2>
       <p>
         <select aria-label="Filter by" value={who} onChange={(e) => setWho(e.target.value)}>
           <option value="">Everyone & everywhere</option>
@@ -47,6 +56,9 @@ export function Timeline({ slug, rows, calendar, onOpen, onCreate, onCalendar }:
         </select>{' '}
         <button onClick={() => onCreate('event')}>New event</button>
       </p>
+      {all.length > 0 && !involved.length && !tags.length && (
+        <p className="muted">To filter by a character, place or theme, fill in an event's <b>involves</b> or <b>tags</b> field.</p>
+      )}
       <CalendarSettings slug={slug} calendar={calendar} onSaved={onCalendar} />
       {!all.length && <p className="muted">No events yet. Events are sorted by their <b>date</b>: a year like 300, or 300-3-12 for year-month-day.</p>}
       <ol>

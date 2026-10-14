@@ -46,7 +46,7 @@ test('comments: add on selected text, edit, not counted or compiled', async ({ p
   expect(md).toContain('A b c.')
 })
 
-test('export: markdown, printable PDF page, Word/EPUB via pandoc (or a clear message)', async ({ page }) => {
+test('export: markdown, printable PDF page, Word, EPUB', async ({ page }) => {
   const { slug, book, open } = await setup(page, 'export')
   await open()
   const url = (f: string) => `/api/projects/${slug}/books/${book.id}/compile?format=${f}`
@@ -54,10 +54,11 @@ test('export: markdown, printable PDF page, Word/EPUB via pandoc (or a clear mes
   const html = await (await page.request.get(url('html'))).text()
   expect(html).toContain('<h2>One</h2>')
   expect(html).toContain('print()')
-  for (const f of ['docx', 'epub']) {
+  for (const [f, type] of [['docx', 'wordprocessingml'], ['epub', 'epub+zip']]) {
     const res = await page.request.get(url(f))
-    if (res.status() === 501) expect(await res.text()).toContain('pandoc') // pandoc not installed here
-    else expect(res.status()).toBe(200)
+    expect(res.status()).toBe(200)
+    expect(res.headers()['content-type']).toContain(type)
+    expect((await res.body()).subarray(0, 2).toString()).toBe('PK') // a zip
   }
   await expect(page.getByLabel('Export Book')).toBeVisible()
 })
