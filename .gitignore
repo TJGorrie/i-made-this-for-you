@@ -1,0 +1,6 @@
+node_modules/
+dist/
+projects/
+*.sqlite
+test-results/
+playwright-report/

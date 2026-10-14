@@ -1,0 +1,89 @@
+// Version history for one entity, and the project's "Deleted items" list.
+import { useEffect, useState } from 'react'
+import { api, fieldText, RESERVED_FIELDS, type Entity } from './api.ts'
+
+type Snapshot = { ts: number; size: number }
+
+const when = (ts: number) => new Date(ts).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
+const formatBytes = (n: number) =>
+  n < 1024 ? `${n} B` : n < 1024 ** 2 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1024 ** 2).toFixed(1)} MB`
+
+type PanelProps = { url: string; beforeRestore: () => Promise<boolean>; onRestored: () => void; onClose: () => void }
+
+export function HistoryPanel({ url, beforeRestore, onRestored, onClose }: PanelProps) {
+  const [versions, setVersions] = useState<Snapshot[]>()
+  const [picked, setPicked] = useState<{ ts: number; entity: Entity }>()
+  useEffect(() => void api(url + '/history').then(setVersions), [url])
+
+  const pick = async (ts: number) => setPicked({ ts, entity: await api(`${url}/history/${ts}`) })
+  async function restore() {
+    if (!picked || !confirm(`Restore the version from ${when(picked.ts)}?\nYour current text is kept in history, so you can undo this.`)) return
+    if (!(await beforeRestore())) return
+    await api(`${url}/history/${picked.ts}/restore`, 'POST')
+    onRestored()
+  }
+  const fields = picked ? Object.entries(picked.entity).filter(([k, v]) => !RESERVED_FIELDS.includes(k) && fieldText(v)) : []
+
+  return (
+    <aside className="history-panel" aria-label="Version history">
+      <div className="history-head">
+        <b>Version history</b>
+        <button className="mini" onClick={onClose} aria-label="Close history">×</button>
+      </div>
+      {versions?.length === 0 && <p className="muted">No earlier versions yet. One is kept before edits (at most every 5 minutes), deletes and restores.</p>}
+      <ol className="versions">
+        {versions?.map((v) => (
+          <li key={v.ts}>
+            <button className={`link ${picked?.ts === v.ts ? 'active' : ''}`} onClick={() => pick(v.ts)}>{when(v.ts)}</button>
+          </li>
+        ))}
+      </ol>
+      {picked && (
+        <div className="version-preview">
+          <button onClick={restore}>Restore this version</button>
+          <h3>{picked.entity.title}</h3>
+          {fields.map(([k, v]) => <div key={k}><small className="muted">{k}:</small> {fieldText(v)}</div>)}
+          <div className="version-body">{picked.entity.body}</div>
+        </div>
+      )}
+    </aside>
+  )
+}
+
+type Deleted = { id: string; title: string; type: string; ts: number; deletedAt: number }
+
+export function DeletedItems({ slug, onRestored }: { slug: string; onRestored: (id: string) => void }) {
+  const [info, setInfo] = useState<{ bytes: number; maxBytes: number; deleted: Deleted[] }>()
+  const load = () => api(`/projects/${slug}/history`).then(setInfo)
+  useEffect(() => void load(), [slug])
+
+  async function restore(d: Deleted) {
+    await api(`/projects/${slug}/entities/${d.id}/history/${d.ts}/restore`, 'POST')
+    onRestored(d.id)
+  }
+
+  return (
+    <div className="deleted-items">
+      <h2>Deleted items</h2>
+      {info && (
+        <p className="muted">
+          Version history uses {formatBytes(info.bytes)} of {formatBytes(info.maxBytes)}.
+          Older versions are thinned automatically; change the limit with <code>historyMaxMB</code> in project.json.
+        </p>
+      )}
+      {info?.deleted.length === 0 && <p className="muted">Nothing deleted.</p>}
+      <table>
+        <tbody>
+          {info?.deleted.map((d) => (
+            <tr key={d.id}>
+              <td>{d.title}</td>
+              <td className="muted">{d.type}</td>
+              <td className="muted">deleted {when(d.deletedAt)}</td>
+              <td><button className="mini" onClick={() => restore(d)}>Restore</button></td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
