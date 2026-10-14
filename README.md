@@ -20,6 +20,12 @@ Need your notes while you write? Shift-click anything to open it beside your sce
 
 ![A scene and a character open side by side](docs/img/split.png)
 
+Mark each scene as an idea, draft, revised or done, and see it at a glance in the sidebar.
+
+## Plan on a corkboard
+
+The Corkboard shows your scenes as index cards, one column per chapter. Write a one-line synopsis on each card and drag cards to reorder them. Give scenes plot threads (`heist, romance`) and pick one to see where it runs through the book, or pick a status or point-of-view character.
+
 ## Keep your world straight
 
 Every character, place, faction and item gets its own entry, with a portrait, the details you care about, and who they're connected to. Each entry also lists every scene it appears in, automatically.
@@ -29,6 +35,8 @@ Every character, place, faction and item gets its own entry, with a portrait, th
 Put your events on a timeline, in your world's own calendar. Filter it by a character, a place or a tag, and see just that thread in order.
 
 ![The timeline in the story's own calendar, filtered by tag](docs/img/timeline.gif)
+
+Give a scene a date and it shows up on the timeline too. Tag an event `death` or `birth`, and the timeline warns you if a character turns up in a scene after they died, or before they were born.
 
 Relationships draw themselves into a map. Filter to parents and siblings and you have a family tree.
 
@@ -48,6 +56,8 @@ The Review page gathers every open comment and note in the book, in reading orde
 
 ![Ticking off a note on the Review page, then clicking a comment to jump to it in the scene](docs/img/review.gif)
 
+Prose stats shows your average sentence length, how much of the book is dialogue, and the words, phrases and -ly adverbs you lean on most. Click one to find every place you used it.
+
 ## Focus when you need to
 
 Focus mode hides everything but the words.
@@ -58,9 +68,11 @@ And a dark mode for late nights.
 
 ![The editor in dark mode](docs/img/editor-dark.png)
 
+On a phone or tablet, the sidebar folds away into a menu. Press **?** to see every keyboard shortcut.
+
 ## Never lose a word
 
-The app saves as you type and keeps earlier versions of everything. Open History to read an old version and bring it back. Deleted something? It's waiting in Deleted items.
+The app saves as you type and keeps earlier versions of everything. Open History to read an old version, see what changed since, and bring it back. Deleted something? It's waiting in Deleted items.
 
 ![Version history, showing an earlier draft of a scene](docs/img/history.png)
 
@@ -74,9 +86,13 @@ Set a daily word goal and keep a streak going. The writing log shows how every d
 
 ![Three weeks of daily word counts against a 500-word goal](docs/img/writing-log.png)
 
-## Share it
+Start a sprint to write against the clock. The writing log keeps every sprint and your words per hour.
 
-When it's time to send it out, export the whole book to Word, EPUB for e-readers, Markdown, or a page you can print or save as PDF. Comments and notes are left out.
+## Bring it in, send it out
+
+Already have a draft? Import a Word, Markdown or text file and it becomes a book: headings become chapters and `* * *` splits the scenes.
+
+When it's time to send it out, export the whole book to Word, EPUB for e-readers, Markdown, or a page you can print or save as PDF. Comments and notes are left out. Submitting to agents? **Word (submission format)** gives you a double-spaced manuscript with a title page, word count and a running header. For beta readers, **Web page for beta readers** makes a single file with a contents list that opens in any browser.
 
 ## Running it
 

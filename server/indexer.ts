@@ -32,6 +32,33 @@ const stripLinks = (md: string) => md.replace(LINK, '$1')
 export const stripComments = (md: string) => md.replace(/\{==([\s\S]+?)==\}\{>>[\s\S]*?<<\}/g, '$1')
 export const countWords = (md: string) => stripLinks(stripComments(md)).match(/[\p{L}\p{N}][\p{L}\p{N}'’-]*/gu)?.length ?? 0
 
+// Find & replace and unlinked mentions only look at the prose itself: never inside a [[link]] or a comment's note.
+const PROTECTED = /\[\[[^\]|]*\|[^\]]+\]\]|\{>>[\s\S]*?<<\}/g
+export type Match = { at: number; text: string }
+
+// Literal text as a pattern (any of several, longest first); wholeWord: not part of a longer word.
+export function findPattern(find: string | string[], { matchCase = false, wholeWord = false } = {}) {
+  const alts = [find].flat().filter(Boolean).sort((a, b) => b.length - a.length).map((s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+  const any = `(?:${alts.join('|')})`
+  return new RegExp(wholeWord ? `(?<![\\p{L}\\p{N}_])${any}(?![\\p{L}\\p{N}_])` : any, matchCase ? 'gu' : 'giu')
+}
+
+export function proseMatches(body: string, re: RegExp): Match[] {
+  const out: Match[] = []
+  let from = 0
+  const scan = (to: number) => { for (const m of body.slice(from, to).matchAll(re)) if (m[0]) out.push({ at: from + m.index, text: m[0] }) }
+  for (const p of body.matchAll(PROTECTED)) { scan(p.index); from = p.index + p[0].length }
+  scan(body.length)
+  return out
+}
+
+// Rewrite the given matches (in order, from proseMatches) with `to(match)`.
+export function spliceMatches(body: string, matches: Match[], to: (m: Match) => string) {
+  let out = '', from = 0
+  for (const m of matches) { out += body.slice(from, m.at) + to(m); from = m.at + m.text.length }
+  return out + body.slice(from)
+}
+
 // Links → the linked entity's current title, or the alias they were written as (stored text if it was deleted).
 export function resolveLinks(db: DatabaseSync, md: string) {
   const get = db.prepare('select title, fields from entities where id = ?')

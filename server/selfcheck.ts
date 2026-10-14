@@ -3,14 +3,17 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { createProject, newEntityPath, newId, parseEntity, readEntity, writeEntity } from './store.ts'
-import { backlinks, countWords, indexFile, linkTargets, openIndex, resolveLinks, search } from './indexer.ts'
+import { createProject, newEntityPath, newId, parseEntity, projectFiles, readEntity, restoreProject, writeEntity } from './store.ts'
+import { backlinks, countWords, findPattern, indexFile, linkTargets, openIndex, proseMatches, resolveLinks, search, spliceMatches } from './indexer.ts'
 import { enforceCap, historyBytes, listSnapshots, prune, readSnapshot, snapshot } from './history.ts'
-import { recordDay, streak, type Goals } from './goals.ts'
+import { projection, recordDay, streak, type Goals } from './goals.ts'
 import { calendarLabel, compareDates, linkText } from '../src/api.ts'
 import { reviewItems, setInline } from './review.ts'
 import { stripComments } from './indexer.ts'
-import { docx, epub } from './export.ts'
+import { docx, docxToMarkdown, epub, importMarkdown, unzip as unzipFiles, zip } from './export.ts'
+import { diffWords } from '../src/diff.ts'
+import { beats, dialogueWords, flesch, overusedRanges, proseStats, proseText, syllablesOf } from '../src/prose.ts'
+import { ageAt, birthYears, continuity } from '../src/continuity.ts'
 import { inflateRawSync, crc32 } from 'node:zlib'
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'writing-tool-'))
@@ -73,6 +76,78 @@ try {
   assert.equal(Object.keys(book2)[0], 'mimetype') // first and stored, as EPUB requires
   assert.equal(book2.mimetype, 'application/epub+zip')
   assert.match(book2['OEBPS/chapter-1.xhtml'], /<h2>Gate<\/h2>\n<p>A <strong>b<\/strong> <em>c<\/em>\.<\/p>\n<p class="break">/)
+
+  // Submission format: double-spaced, title page with word count, running header "Surname / TITLE / page".
+  const sub = unzip(docx({ ...book, author: 'Mara Vell', words: 1200 }, true))
+  assert.match(sub['word/styles.xml'], /w:line="480"/)
+  assert.match(sub['word/header1.xml'], /Vell \/ ASH &#38; EMBER \/ <\/w:t><\/w:r><w:fldSimple w:instr="PAGE">/)
+  assert.match(sub['word/document.xml'], /About 1,200 words/)
+  assert.match(sub['word/document.xml'], /<w:headerReference w:type="default" r:id="rH"\/><w:titlePg\/>/)
+  assert.match(sub['word/_rels/document.xml.rels'], /Target="header1.xml"/)
+  assert.ok(!('word/header1.xml' in word)) // plain Word export unchanged
+
+  // Import: Markdown splits into chapters and scenes; Word round-trips our own export.
+  assert.deepEqual(importMarkdown('# Salt\n\n## One\n\nA.\n\n* * *\n\nB.\n\n## Two\n\nC.\n#\nD.', 'file'), {
+    title: 'Salt', chapters: [{ title: 'One', scenes: ['A.', 'B.'] }, { title: 'Two', scenes: ['C.', 'D.'] }],
+  })
+  assert.deepEqual(importMarkdown('Just text.\n\n---\n\nMore.', 'notes'), { title: 'notes', chapters: [{ title: 'Chapter 1', scenes: ['Just text.', 'More.'] }] })
+  assert.deepEqual(importMarkdown('Prologue text.\n\n## One\n\nA.', 'f').chapters.map((c) => c.title), ['Untitled chapter', 'One'])
+  const back = importMarkdown(docxToMarkdown(docx(book)), 'x')
+  assert.deepEqual(back, { title: 'Ash & Ember', chapters: [{ title: 'Gate', scenes: ['A **b** *c*.', 'Next <scene>.'] }] })
+  // Word splits runs freely: neighbours with the same style merge, and markdown characters in the text are escaped.
+  const runsXml = '<w:document><w:body><w:p><w:r><w:rPr><w:i/></w:rPr><w:t>He</w:t></w:r><w:r><w:rPr><w:i/></w:rPr><w:t xml:space="preserve">llo </w:t></w:r>' +
+    '<w:r><w:t>2*3 &amp; </w:t></w:r><w:r><w:rPr><w:b w:val="0"/></w:rPr><w:t>x</w:t></w:r></w:p><w:p><w:r><w:t>#</w:t></w:r></w:p></w:body></w:document>'
+  assert.equal(docxToMarkdown(zip([{ name: 'word/document.xml', data: runsXml }])), '*Hello* 2\\*3 & x\n\n* * *')
+  assert.throws(() => docxToMarkdown(zip([{ name: 'other.xml', data: '' }])), /Word document/)
+
+  // Word diff: unchanged words kept, changes marked, whitespace preserved.
+  assert.deepEqual(diffWords('The grey cat sat.', 'The black cat sat down.'), [
+    { op: '=', text: 'The ' }, { op: '-', text: 'grey' }, { op: '+', text: 'black' }, { op: '=', text: ' cat ' },
+    { op: '-', text: 'sat.' }, { op: '+', text: 'sat down.' },
+  ])
+  assert.deepEqual(diffWords('same', 'same'), [{ op: '=', text: 'same' }])
+  assert.deepEqual(diffWords('', 'new text'), [{ op: '+', text: 'new text' }])
+  const rebuilt = (parts: { op: string; text: string }[], skip: string) => parts.filter((p) => p.op !== skip).map((p) => p.text).join('')
+  const [va, vb] = ['one two three four five six', 'one 2 three five six seven']
+  assert.equal(rebuilt(diffWords(va, vb), '+'), va)
+  assert.equal(rebuilt(diffWords(va, vb), '-'), vb)
+
+  // Prose stats.
+  const ps = proseStats('# Book\n\n## One\n\nShe ran quickly. "Run," he said, "run really fast."\n\n* * *\n\nShe ran quickly home. She ran quickly again.')
+  assert.equal(ps.words, 17)
+  assert.equal(ps.sentences, 4)
+  assert.equal(ps.dialogue, 24) // 4 of 17 words inside quotes
+  assert.deepEqual(ps.adverbs, [['quickly', 3]])
+  assert.deepEqual(ps.phrases, [['she ran quickly', 3]])
+  assert.deepEqual(ps.topWords.slice(0, 3), [['quickly', 3], ['ran', 3], ['run', 2]])
+  assert.deepEqual(ps.crutches, [['really', 1]])
+
+  // Readability: syllables by vowel groups, Flesch reading ease.
+  assert.deepEqual(['cat', 'table', 'beautiful', 'the', 'rhythm', 'Gate'].map(syllablesOf), [1, 2, 3, 1, 1, 1])
+  assert.equal(proseStats('The cat sat on the mat.').flesch.toFixed(3), '116.145') // 206.835 − 1.015×6 − 84.6×1
+  assert.equal(flesch(0, 0, 0), 0)
+  assert.equal(ps.dialogue, Math.round((dialogueWords(proseText('She ran quickly. "Run," he said, "run really fast."')) / 17) * 100))
+
+  // Beats: the scene where the running total crosses ¼, ½, ¾; empty scenes never get one.
+  const bs = (ws: number[]) => beats(ws.map((words, i) => ({ id: `s${i}`, words }))).map((b) => `${b.sceneId}:${b.beat}`)
+  assert.deepEqual(bs([100, 100, 100, 100]), ['s0:¼', 's1:Midpoint', 's2:¾'])
+  assert.deepEqual(bs([0, 400, 0, 100]), ['s1:¼', 's1:Midpoint', 's1:¾'])
+  assert.deepEqual(bs([50]), ['s0:¼', 's0:Midpoint', 's0:¾'])
+  assert.deepEqual(bs([0, 0]), [])
+
+  // Overused words while writing: crutch words (whole words only) and -ly adverbs, with positions.
+  const ov = 'Suddenly she just ran quickly, unjustly? Her family began to stare. Justice.'
+  assert.deepEqual(overusedRanges(ov).map((r) => `${ov.slice(r.from, r.to)}:${r.why}`),
+    ['Suddenly:often cut in revision', 'just:often cut in revision', 'quickly:-ly adverb', 'unjustly:-ly adverb', 'began to:often cut in revision'])
+
+  // Continuity: a scene after a character's death (or before their birth) that still has them in it.
+  const r = (id: string, type: string, extra = {}) => ({ id, type, title: id, words: 0, ...extra })
+  const crows = [r('ana', 'character'), r('bo', 'character'), r('dies', 'event', { date: '300-5', tags: 'Death, war' }),
+    r('born', 'event', { date: '280', tags: 'birth' }), r('s1', 'scene', { date: '300-4' }), r('s2', 'scene', { date: '301' }),
+    r('s3', 'scene', { date: '279' }), r('s4', 'scene')]
+  const clinks = [['dies', 'ana'], ['born', 'bo'], ['s1', 'ana'], ['s2', 'ana'], ['s2', 'bo'], ['s3', 'bo'], ['s4', 'ana']]
+    .map(([from_id, to_id]) => ({ from_id, to_id }))
+  assert.deepEqual(continuity(crows, clinks).map((w) => `${w.scene.id}:${w.who.id}:${w.kind}`), ['s2:ana:death', 's3:bo:birth'])
 
   // Timeline dates: plain numbers and year-month-day sort together; calendar labels.
   const dates = ['300-3-12', 'Undated', '-12.5', '300', '300-3-2', '299-12']
@@ -184,6 +259,74 @@ try {
   assert.equal(streak(g, '2026-03-03'), 3)
   assert.equal(streak(g, '2026-03-05'), 0) // missed a day
   assert.equal(streak({ days: g.days }, '2026-03-03'), 0) // no goal set
+
+  // Deadline projection: 400 net words in the last 14 days → 1,400 words left take 49 days.
+  assert.deepEqual(projection(g, '2026-03-03', 1400, 2800), { pace: 29, left: 1400, finish: '2026-04-21' })
+  assert.deepEqual(projection(g, '2026-03-03', 2800, 2800), { pace: 29, left: 0, finish: '2026-03-03' }) // done
+  assert.equal(projection(g, '2026-06-01', 1400, 2800).finish, null) // nothing written lately: no pace
+
+  // ---- Find & replace: prose only, never inside links or comment notes ----
+  const prose = 'Ana met [[Ana|a1]]. {==ana smiled==}{>>Ana? check<<} Banana. ANA.'
+  const hits = proseMatches(prose, findPattern('ana', { wholeWord: true }))
+  assert.deepEqual(hits.map((h) => h.text), ['Ana', 'ana', 'ANA'])
+  assert.equal(spliceMatches(prose, hits, () => 'Bea'), 'Bea met [[Ana|a1]]. {==Bea smiled==}{>>Ana? check<<} Banana. Bea.')
+  assert.equal(proseMatches(prose, findPattern('ana', { matchCase: true })).length, 2) // "ana" smiled, Banana
+  assert.equal(proseMatches('a.b axb', findPattern('a.b')).length, 1) // literal text, not a regex
+  assert.deepEqual(proseMatches('The Fox and the fox', findPattern(['Fox', 'The Fox'], { wholeWord: true })).map((h) => h.text), ['The Fox', 'the fox'])
+
+  // ---- Word comments survive export → import ----
+  const reviewed = { title: 'R', author: 'Mara Vell', chapters: [{ title: 'One', scenes: ['A {==b **c**==}{>>tighten<<} d.', 'E {==f==}{>>[x] done<<}.'] }] }
+  const rw = unzip(docx(reviewed))
+  assert.match(rw['word/comments.xml'], /<w:comment w:id="0" w:author="Mara Vell"><w:p><w:r><w:t xml:space="preserve">tighten</)
+  assert.match(rw['word/document.xml'], /<w:commentRangeStart w:id="1"\/><w:r><w:t xml:space="preserve">f<\/w:t><\/w:r><w:commentRangeEnd w:id="1"\/>/)
+  assert.match(rw['[Content_Types].xml'], /comments\+xml/)
+  assert.deepEqual(importMarkdown(docxToMarkdown(docx(reviewed)), 'x').chapters[0].scenes, reviewed.chapters[0].scenes)
+  assert.ok(!('word/comments.xml' in word)) // no comments, no comments part
+
+  // ---- Front and back matter, EPUB cover and language ----
+  const matter = { ...book, dedication: 'For *M*.', acknowledgements: 'Thanks, all.', language: 'fr', cover: { file: 'art.png', type: 'image/png', data: Buffer.from('png') } }
+  const mw = unzip(docx(matter))['word/document.xml']
+  assert.ok(mw.indexOf('w:val="Title"') < mw.indexOf('w:val="Dedication"') && mw.indexOf('w:val="Dedication"') < mw.indexOf('>Gate<'))
+  assert.match(mw, /<w:br w:type="page"\/>[\s\S]*<w:i\/><\/w:rPr><w:t xml:space="preserve">M</) // dedication on its own page, italics kept
+  assert.ok(mw.indexOf('>Acknowledgements<') > mw.indexOf('Next &#60;scene&#62;'))
+  assert.match(unzip(docx(matter, true))['word/document.xml'], /Dedication[\s\S]*Acknowledgements/) // submission too
+  const me = unzip(epub(matter))
+  assert.match(me['OEBPS/content.opf'], /<dc:language>fr<\/dc:language>/)
+  assert.match(me['OEBPS/content.opf'], /<item id="cover-image" href="cover.png" media-type="image\/png" properties="cover-image"\/>/)
+  assert.match(me['OEBPS/content.opf'], /<spine>(<itemref idref="c\d"\/>){5}<\/spine>/) // cover, title, dedication, chapter, acknowledgements
+  assert.equal(me['OEBPS/cover.png'], 'png')
+  assert.match(me['OEBPS/cover.xhtml'], /lang="fr"[\s\S]*<img src="cover.png" alt="Cover"\/>/)
+  assert.match(me['OEBPS/dedication.xhtml'], /For <em>M<\/em>\./)
+  assert.match(me['OEBPS/nav.xhtml'], /<a href="acknowledgements.xhtml">Acknowledgements<\/a>/)
+  assert.match(unzip(epub({ ...book, language: '"><x' }))['OEBPS/content.opf'], /<dc:language>en<\/dc:language>/) // junk → en
+  assert.ok(!('OEBPS/cover.xhtml' in book2))
+
+  // ---- Ages: scene year minus the year of a birth event ----
+  const born = birthYears(crows, clinks)
+  assert.deepEqual([...born], [['bo', 280]])
+  assert.equal(ageAt(born, 'bo', '301'), 21)
+  assert.equal(ageAt(born, 'bo', '300-4-2'), 20)
+  assert.equal(ageAt(born, 'bo', ''), undefined) // undated scene
+  assert.equal(ageAt(born, 'ana', '301'), undefined) // no birth event
+
+  // ---- Backup → restore: a new project with every file identical; unsafe paths refused ----
+  const backupFiles = projectFiles(dir)
+  assert.ok(backupFiles.some((f) => f.name.startsWith('.history/')) && !backupFiles.some((f) => f.name.includes('.index.sqlite')))
+  const root2 = fs.mkdtempSync(path.join(os.tmpdir(), 'writing-tool-restore-'))
+  try {
+    const slug = await restoreProject(root2, unzipFiles(zip(backupFiles)))
+    assert.equal(slug, 'test-novel')
+    assert.deepEqual(projectFiles(path.join(root2, slug)), backupFiles)
+    assert.equal(await restoreProject(root2, unzipFiles(zip(backupFiles))), 'test-novel-2') // never over an existing project
+    for (const bad of ['../evil.md', 'wiki/../../evil.md', '/abs.md', 'C:/x.md', 'a\\..\\..\\evil.md']) {
+      const files = new Map([['project.json', Buffer.from('{"name":"Evil"}')], [bad, Buffer.from('x')]])
+      await assert.rejects(restoreProject(root2, files), /Unsafe path/)
+    }
+    assert.ok(!fs.existsSync(path.join(root2, 'evil')) && !fs.existsSync(path.join(root2, 'evil.md')) && !fs.existsSync(path.join(os.tmpdir(), 'evil.md')))
+    await assert.rejects(restoreProject(root2, new Map([['notes.md', Buffer.from('x')]])), /Not a project backup/)
+  } finally {
+    fs.rmSync(root2, { recursive: true, force: true })
+  }
 
   console.log('selfcheck ok')
 } finally {

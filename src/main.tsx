@@ -1,8 +1,10 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { aliasesOf, api, MANUSCRIPT_TYPES, type Calendar, type Row } from './api.ts'
 import { Editor } from './Editor.tsx'
 import { Manuscript } from './Manuscript.tsx'
+import { Board } from './Board.tsx'
+import { ProseView } from './Prose.tsx'
 import { TypeTable } from './Wiki.tsx'
 import { SearchResults } from './Search.tsx'
 import { Timeline } from './Timeline.tsx'
@@ -11,9 +13,13 @@ import { DeletedItems } from './History.tsx'
 import { TemplateEditor } from './Templates.tsx'
 import { Today, WritingLog } from './Goals.tsx'
 import { openCount, ReviewView, type ReviewEntry } from './Review.tsx'
+import { Shortcuts } from './Help.tsx'
+import { Cast } from './Cast.tsx'
+import { Drafts } from './Drafts.tsx'
+import { birthYears, type Link } from './continuity.ts'
 
 type Project = { name: string; templates: Record<string, string[]>; calendar?: Calendar }
-type Tool = 'timeline' | 'graph' | 'templates' | 'deleted' | 'log' | 'review'
+type Tool = 'board' | 'timeline' | 'graph' | 'templates' | 'deleted' | 'log' | 'review' | 'prose' | 'cast' | 'drafts'
 
 
 // Theme: follows the system unless picked; remembered per browser (best effort, storage may be blocked).
@@ -49,15 +55,28 @@ function App() {
   if (slug) return <ProjectView slug={slug} onClose={() => setSlug(null)} />
   const create = () =>
     api('/projects', 'POST', { name }).then((p) => setSlug(p.slug), (e) => setError(e.message))
+  async function restore(file: File) {
+    const res = await fetch('/api/projects/restore', { method: 'POST', body: file })
+    if (!res.ok) return setError(await res.text())
+    setSlug((await res.json()).slug)
+  }
   return (
     <main className="projects">
       <h2>Projects <ThemeToggle /></h2>
       {projects.map((p) => (
-        <button key={p.slug} className="link" onClick={() => setSlug(p.slug)}>{p.name}</button>
+        <div key={p.slug} className="project-row">
+          <button className="link" onClick={() => setSlug(p.slug)}>{p.name}</button>
+          <a className="mini" href={`/api/projects/${p.slug}/backup`} download title="Download the whole project, history included, as a .zip">back up</a>
+        </div>
       ))}
       <p>
         <input placeholder="New project name" value={name} onChange={(e) => setName(e.target.value)} />{' '}
-        <button onClick={create} disabled={!name.trim()}>Create</button>
+        <button onClick={create} disabled={!name.trim()}>Create</button>{' '}
+        <label className="mini upload" title="Restore a backup .zip as a new project (existing projects are never changed)">
+          Restore a backup
+          <input type="file" accept=".zip" hidden aria-label="Restore a backup"
+            onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) restore(f) }} />
+        </label>
       </p>
       {error && <p className="error">{error}</p>}
       <Settings onFolder={setFolder} />
@@ -115,9 +134,17 @@ function ProjectView({ slug, onClose }: { slug: string; onClose: () => void }) {
   const [focus, setFocus] = useState(false)
   const [review, setReview] = useState<ReviewEntry[]>([])
   const [focusItem, setFocusItem] = useState<number>() // inline comment to select when the editor opens
+  const [menu, setMenu] = useState(false) // narrow screens: the sidebar opens over the page
+  const [shortcuts, setShortcuts] = useState(false)
+  const [links, setLinks] = useState<Link[]>([])
+  const [epoch, setEpoch] = useState(0) // bumped when files change behind open editors (find & replace): they reload
+  const [typewriter, setTypewriter] = useState(false) // focus mode: keep the caret mid-screen
+  const [dim, setDim] = useState(false) // focus mode: fade all but the current paragraph
+  const [highlight, setHighlight] = useState(false) // mark overused words in the text
+  const searchRef = useRef<HTMLInputElement>(null)
   const refresh = async () => {
-    const [r, rv] = await Promise.all([api(`/projects/${slug}/entities`), api(`/projects/${slug}/review`)])
-    setRows(r); setReview(rv)
+    const [r, rv, l] = await Promise.all([api(`/projects/${slug}/entities`), api(`/projects/${slug}/review`), api(`/projects/${slug}/links`)])
+    setRows(r); setReview(rv); setLinks(l)
   }
   useEffect(() => {
     api(`/projects/${slug}`).then(setProject)
@@ -133,6 +160,19 @@ function ProjectView({ slug, onClose }: { slug: string; onClose: () => void }) {
     addEventListener('keydown', onKey)
     return () => removeEventListener('keydown', onKey)
   }, [focus])
+  // Ctrl/⌘+K: search. "?" (when not typing): the shortcuts sheet.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const typing = (e.target as HTMLElement).closest?.('input, textarea, select, [contenteditable="true"]')
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault()
+        setFocus(false); setMenu(true)
+        setTimeout(() => searchRef.current?.focus()) // after focus mode / the menu has shown the sidebar
+      } else if (e.key === '?' && !typing) setShortcuts(true)
+    }
+    addEventListener('keydown', onKey)
+    return () => removeEventListener('keydown', onKey)
+  }, [])
 
   if (!project) return null
   const open = (id: string, beside = false) => {
@@ -140,11 +180,11 @@ function ProjectView({ slug, onClose }: { slug: string; onClose: () => void }) {
       if (id !== selected) setSide(id)
       return
     }
-    setSelected(id); setTypeView(null); setTool(null); setFocusItem(undefined)
+    setSelected(id); setTypeView(null); setTool(null); setFocusItem(undefined); setMenu(false)
     if (side === id) setSide(null)
   }
-  const openType = (t: string) => { setSelected(null); setTypeView(t); setTool(null) }
-  const openTool = (t: Tool | null) => { setSelected(null); setTypeView(null); setTool(t) }
+  const openType = (t: string) => { setSelected(null); setTypeView(t); setTool(null); setMenu(false) }
+  const openTool = (t: Tool | null) => { setSelected(null); setTypeView(null); setTool(t); if (t) setMenu(false) }
   const create = async (type: string) => {
     const title = prompt(`New ${type} title`)?.trim()
     if (!title) return
@@ -159,9 +199,13 @@ function ProjectView({ slug, onClose }: { slug: string; onClose: () => void }) {
   const current = rows.find((r) => r.id === selected)
   const sideRow = rows.find((r) => r.id === side)
   const targets = rows.filter((r) => !MANUSCRIPT_TYPES.includes(r.type)).map((r) => ({ ...r, aliases: aliasesOf(r.aliases) }))
+  const born = birthYears(rows, links)
   const editorFor = (r: Row, inSide: boolean) => (
     <Editor
-      key={r.id}
+      key={`${r.id}:${epoch}`}
+      born={born}
+      highlight={highlight}
+      onHighlight={setHighlight}
       url={`/projects/${slug}/entities/${r.id}`}
       fields={project.templates[r.type] ?? []}
       onSaved={refresh}
@@ -179,24 +223,33 @@ function ProjectView({ slug, onClose }: { slug: string; onClose: () => void }) {
   )
 
   return (
-    <div className={`app ${focus ? 'focus' : ''}`}>
+    <div className={`app ${focus ? 'focus' : ''} ${menu ? 'menu-open' : ''} ${typewriter ? 'typewriter' : ''} ${dim ? 'dim' : ''} ${highlight ? 'highlight' : ''}`}>
+      <button className="mini menu-toggle" aria-expanded={menu} onClick={() => setMenu(!menu)}>☰ {project.name}</button>
       <aside>
         <div className="aside-head">
           <button className="link" onClick={onClose}>&larr; Projects</button>
-          <ThemeToggle />
+          <span>
+            <button className="mini" onClick={() => setShortcuts(true)} title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts">⌨</button>{' '}
+            <ThemeToggle />
+          </span>
         </div>
         <h3>{project.name}</h3>
         <Today slug={slug} rows={rows} />
         <input
-          type="search" className="filter" placeholder="Search everything…" value={query}
+          ref={searchRef} type="search" className="filter" placeholder="Search everything…" value={query}
           onChange={(e) => { setQuery(e.target.value); openTool(null) }}
+          onKeyDown={(e) => e.key === 'Enter' && setMenu(false)}
         />
         <Manuscript slug={slug} rows={rows} selected={selected} onSelect={open} refresh={refresh} />
         <h4>Views</h4>
+        {viewLink('board', 'Corkboard')}
         {viewLink('timeline', 'Timeline')}
         {viewLink('graph', 'Relationships')}
+        {viewLink('cast', 'Cast')}
         {viewLink('review', `Review (${openCount(review)} open)`)}
         {viewLink('log', 'Writing log')}
+        {viewLink('prose', 'Prose stats')}
+        {viewLink('drafts', 'Drafts')}
         {viewLink('templates', 'Templates')}
         {viewLink('deleted', 'Deleted items')}
         <h4>Wiki</h4>
@@ -223,28 +276,42 @@ function ProjectView({ slug, onClose }: { slug: string; onClose: () => void }) {
       <main className={sideRow ? 'split' : ''}>
         <div className="pane">
           {current && editorFor(current, false)}
+          {tool === 'board' && <Board slug={slug} rows={rows} onOpen={open} refresh={refresh} />}
           {tool === 'timeline' && (
             <Timeline slug={slug} rows={rows} calendar={project.calendar} onOpen={open} onCreate={create}
               onCalendar={(calendar) => setProject({ ...project, calendar })} />
           )}
           {tool === 'graph' && <Graph rows={rows} onOpen={open} />}
+          {tool === 'cast' && <Cast rows={rows} links={links} onOpen={open} />}
+          {tool === 'drafts' && <Drafts slug={slug} rows={rows} />}
           {tool === 'templates' && (
             <TemplateEditor slug={slug} templates={project.templates} onSaved={(templates) => setProject({ ...project, templates })} />
           )}
           {tool === 'log' && <WritingLog slug={slug} />}
+          {tool === 'prose' && <ProseView slug={slug} rows={rows} onSearch={(q) => { setQuery(q); openTool(null) }} />}
           {tool === 'review' && (
             <ReviewView slug={slug} rows={rows} review={review} refresh={refresh}
               onOpen={(id, item) => { open(id); setFocusItem(item) }} />
           )}
           {tool === 'deleted' && <DeletedItems slug={slug} onRestored={async (id) => { await refresh(); open(id) }} />}
-          {query.trim() && !current && !typeView && !tool && <SearchResults slug={slug} q={query} onOpen={open} />}
+          {query.trim() && !current && !typeView && !tool && <SearchResults slug={slug} q={query} onOpen={open} onReplaced={() => { setEpoch((n) => n + 1); refresh() }} />}
           {typeView && (
             <TypeTable type={typeView} rows={rows} fields={project.templates[typeView] ?? []} onOpen={open} onCreate={create} />
           )}
         </div>
         {sideRow && <div className="pane side-pane" aria-label="Side pane">{editorFor(sideRow, true)}</div>}
       </main>
-      {focus && <button className="mini exit-focus" onClick={() => setFocus(false)}>Exit focus (Esc)</button>}
+      {focus && (
+        <div className="focus-bar">
+          {/* preventDefault on mousedown: keep the cursor in the text. */}
+          <button className="mini" aria-pressed={typewriter} onMouseDown={(e) => e.preventDefault()} onClick={() => setTypewriter(!typewriter)}
+            title="Keep the line you're typing in the middle of the screen">Typewriter</button>
+          <button className="mini" aria-pressed={dim} onMouseDown={(e) => e.preventDefault()} onClick={() => setDim(!dim)}
+            title="Fade every paragraph but the one you're in">Dim</button>
+          <button className="mini" onClick={() => setFocus(false)}>Exit focus (Esc)</button>
+        </div>
+      )}
+      <Shortcuts open={shortcuts} onClose={() => setShortcuts(false)} />
     </div>
   )
 }

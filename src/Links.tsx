@@ -1,6 +1,6 @@
 // Hover preview for [[links]] and the "Appears in" backlinks panel.
 import { useEffect, useState } from 'react'
-import { api, fieldText, plainText, RESERVED_FIELDS, type Entity, type Row } from './api.ts'
+import { api, fieldText, plainText, readable, RESERVED_FIELDS, type Entity, type Row } from './api.ts'
 
 export function LinkPreview({ url, x, y }: { url: string; x: number; y: number }) {
   const [e, setE] = useState<Entity | null>()
@@ -32,9 +32,18 @@ const SECTIONS: [string, (field: string) => boolean][] = [
   ['On maps', (f) => f === 'pins'],
 ]
 
-export function Backlinks({ url, onOpen }: { url: string; onOpen: (id: string) => void }) {
+type Mention = { id: string; type: string; title: string; index: number; text: string; before: string; after: string }
+
+// unlinked: also list places that name this entry in plain text (wiki entries only), each with a Link button.
+export function Backlinks({ url, onOpen, unlinked }: { url: string; onOpen: (id: string) => void; unlinked: boolean }) {
   const [rows, setRows] = useState<Backlink[]>([])
-  useEffect(() => void api(url + '/backlinks').then(setRows), [url])
+  const [mentions, setMentions] = useState<Mention[]>([])
+  const load = () => {
+    api(url + '/backlinks').then(setRows)
+    if (unlinked) api(url + '/unlinked').then(setMentions)
+  }
+  useEffect(load, [url])
+  const link = (m: Mention) => api(url + '/unlinked', 'PATCH', { scene: m.id, index: m.index }).then(load, (e) => { alert(e.message); load() })
   const appearsIn = new Set(rows.filter((r) => APPEARS.includes(r.field)).map((r) => r.id))
 
   const sections = SECTIONS.map(([heading, match]) => {
@@ -50,7 +59,7 @@ export function Backlinks({ url, onOpen }: { url: string; onOpen: (id: string) =
     return { heading, items: [...items.values()] }
   }).filter((s) => s.items.length)
 
-  if (!sections.length) return null
+  if (!sections.length && !mentions.length) return null
   return (
     <footer className="backlinks">
       {sections.map(({ heading, items }) => (
@@ -63,6 +72,18 @@ export function Backlinks({ url, onOpen }: { url: string; onOpen: (id: string) =
           ))}
         </section>
       ))}
+      {mentions.length > 0 && (
+        <section aria-label="Unlinked mentions" className="unlinked">
+          <h4>Unlinked mentions</h4>
+          {mentions.map((m) => (
+            <div key={`${m.id}:${m.index}`} className="mention">
+              <button className="link" onClick={() => onOpen(m.id)}>{m.title}</button>
+              <small>{readable(m.before)}<mark>{m.text}</mark>{readable(m.after)}</small>
+              <button className="mini" onClick={() => link(m)} title={`Turn this "${m.text}" into a link`}>Link</button>
+            </div>
+          ))}
+        </section>
+      )}
     </footer>
   )
 }

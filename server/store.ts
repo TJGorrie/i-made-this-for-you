@@ -15,9 +15,9 @@ export const slugify = (s: string) =>
 // "appears:character[]" a list of them, "mentioned:*[]" a list of links to any wiki entity, "portrait:image" an
 // uploaded picture, "gallery:image[]" several. See parseField in src/api.ts.
 const DEFAULT_TEMPLATES = {
-  book: ['target'],
+  book: ['author', 'target', 'dedication', 'acknowledgements', 'cover:image', 'language'],
   chapter: ['target'],
-  scene: ['status', 'pov:character', 'appears:character[]', 'mentioned:*[]'],
+  scene: ['status', 'synopsis', 'threads', 'date', 'target', 'pov:character', 'appears:character[]', 'mentioned:*[]'],
   character: ['portrait:image', 'aliases', 'age', 'role', 'appearance', 'personality', 'goals'],
   location: ['aliases', 'region', 'climate', 'gallery:image[]'],
   item: ['owner:character', 'origin'],
@@ -101,4 +101,42 @@ export async function createProject(root: string, name: string) {
   await atomicWrite(path.join(dir, 'templates.json'), JSON.stringify(DEFAULT_TEMPLATES, null, 2))
   await atomicWrite(path.join(dir, 'project.json'), JSON.stringify({ name }, null, 2))
   return { slug, dir }
+}
+
+// ---- Backup and restore ----
+
+// Every file in the project except the index (a cache, rebuilt on open) and temp files: history, goals and drafts included.
+// improvement: the zip writer has no zip64, so a project over 4 GB or 65,535 files can't be backed up this way.
+export function projectFiles(dir: string) {
+  return (fs.readdirSync(dir, { recursive: true }) as string[])
+    .map((f) => f.split(path.sep).join('/'))
+    .filter((f) => !/^\.index\.sqlite/.test(f) && !STALE_TMP.test(f) && fs.statSync(path.join(dir, f)).isFile())
+    .sort()
+    .map((name) => ({ name, data: fs.readFileSync(path.join(dir, name)) }))
+}
+
+// Unpack a backup into a new project folder (suffixed -2, -3... if the name is taken); never touches an existing project.
+// Every path is checked before anything is written: no "..", no absolute paths or drive letters, nothing outside the new folder.
+export async function restoreProject(root: string, files: Map<string, Buffer>) {
+  const names = [...files.keys()].filter((n) => !n.endsWith('/') && !/^\.index\.sqlite/.test(n))
+  for (const n of names)
+    if (/^[\\/]|:/.test(n) || n.split(/[\\/]/).some((part) => part === '..' || part === '.'))
+      throw new Error(`Unsafe path in backup: ${n}`)
+  let name: string
+  try { name = String(JSON.parse(files.get('project.json')!.toString('utf8')).name ?? '').trim() } catch { name = '' }
+  if (!name) throw new Error('Not a project backup (no project.json)')
+  let slug = slugify(name)
+  for (let n = 2; fs.existsSync(path.join(root, slug)); n++) slug = `${slugify(name)}-${n}`
+  const dir = path.resolve(root, slug)
+  for (const n of names) {
+    const file = path.resolve(dir, n)
+    if (!file.startsWith(dir + path.sep)) throw new Error(`Unsafe path in backup: ${n}`)
+  }
+  try {
+    for (const n of names) await atomicWrite(path.join(dir, n), files.get(n)!)
+  } catch (e) {
+    fs.rmSync(dir, { recursive: true, force: true }) // our own new folder, half written
+    throw e
+  }
+  return slug
 }

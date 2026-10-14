@@ -1,8 +1,9 @@
 // Events in date order. `date` sorts ("300", or "300-3-12" with a calendar); `dateLabel`, if set, is shown instead.
 // Filter by an entity the events link to, or by tag.
 import { useEffect, useState } from 'react'
-import { api, calendarLabel, compareDates, fieldText, type Calendar, type Row } from './api.ts'
+import { api, calendarLabel, compareDates, fieldText, tagList, type Calendar, type Row } from './api.ts'
 import { Help } from './Help.tsx'
+import { continuity } from './continuity.ts'
 
 type Props = {
   slug: string; rows: Row[]; calendar?: Calendar
@@ -10,7 +11,7 @@ type Props = {
 }
 
 // `tags: war, politics` (comma-separated, any entity can have them).
-const tagsOf = (r: Row) => fieldText(r.tags).split(',').map((t) => t.trim().toLowerCase()).filter(Boolean)
+const tagsOf = (r: Row) => tagList(r.tags)
 
 export function Timeline({ slug, rows, calendar, onOpen, onCreate, onCalendar }: Props) {
   const [links, setLinks] = useState<{ from_id: string; to_id: string }[]>([])
@@ -20,8 +21,10 @@ export function Timeline({ slug, rows, calendar, onOpen, onCreate, onCalendar }:
   const byId = new Map(rows.map((r) => [r.id, r]))
   const linked = (id: string) =>
     [...new Set(links.filter((l) => l.from_id === id).map((l) => l.to_id))].flatMap((to) => byId.get(to) ?? [])
-  const all = rows.filter((r) => r.type === 'event')
+  // Events, plus scenes that have a date (so you can see where the story's scenes fall among events).
+  const all = rows.filter((r) => r.type === 'event' || (r.type === 'scene' && fieldText(r.date)))
     .sort((a, b) => compareDates(fieldText(a.date), fieldText(b.date)) || a.title.localeCompare(b.title))
+  const warnings = continuity(rows, links)
   const involved = [...new Map(all.flatMap((e) => linked(e.id)).map((r) => [r.id, r])).values()]
   const tags = [...new Set(all.flatMap(tagsOf))].sort()
   // Filter value is an entity id, or "#tag".
@@ -39,6 +42,8 @@ export function Timeline({ slug, rows, calendar, onOpen, onCreate, onCalendar }:
           To add someone, pick them in the event's <b>involves</b> field (or @-mention them in its text).
           For themes, write <b>tags</b> like <code>war, politics</code>.</span>
         <span><b>Calendar:</b> name your world's months and era, so <code>300-3-12</code> shows as "12 Frostmoon, Year 300".</span>
+        <span><b>Scenes</b> with a <b>date</b> show here too. Tag an event <code>death</code> or <code>birth</code> and you'll be warned
+          when a scene dated after the death (or before the birth) still has that character in it.</span>
       </Help></h2>
       <p>
         <select aria-label="Filter by" value={who} onChange={(e) => setWho(e.target.value)}>
@@ -60,13 +65,29 @@ export function Timeline({ slug, rows, calendar, onOpen, onCreate, onCalendar }:
         <p className="muted">To filter by a character, place or theme, fill in an event's <b>involves</b> or <b>tags</b> field.</p>
       )}
       <CalendarSettings slug={slug} calendar={calendar} onSaved={onCalendar} />
+      {warnings.length > 0 && (
+        <div className="conflict" role="note" aria-label="Continuity warnings">
+          <b>Continuity</b>
+          <ul>
+            {warnings.map((w) => (
+              <li key={w.scene.id + w.who.id + w.event.id}>
+                <button className="link" onClick={() => onOpen(w.scene.id)}>{w.scene.title}</button> is dated{' '}
+                {w.kind === 'death' ? 'after' : 'before'}{' '}
+                <button className="link" onClick={() => onOpen(w.event.id)}>{w.event.title}</button>, but{' '}
+                <button className="link" onClick={() => onOpen(w.who.id)}>{w.who.title}</button> is in it.
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
       {!all.length && <p className="muted">No events yet. Events are sorted by their <b>date</b>: a year like 300, or 300-3-12 for year-month-day.</p>}
       <ol>
         {events.map((e) => (
-          <li key={e.id}>
+          <li key={e.id} className={e.type}>
             <span className="when">{fieldText(e.dateLabel) || calendarLabel(fieldText(e.date), calendar) || 'Undated'}</span>
             <div>
               <button className="link" onClick={() => onOpen(e.id)}>{e.title}</button>
+              {e.type === 'scene' && <small className="muted"> scene</small>}
               {linked(e.id).map((r) => (
                 <button key={r.id} className="chip" onClick={() => onOpen(r.id)}>{r.title}</button>
               ))}

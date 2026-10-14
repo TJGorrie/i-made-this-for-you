@@ -2,7 +2,7 @@
 import { parseNote, plainText, reviewNotes } from '../src/api.ts'
 import type { Entity } from './store.ts'
 
-const CRITIC = /\{==([\s\S]+?)==\}\{>>([\s\S]*?)<<\}/g
+export const CRITIC = /\{==([\s\S]+?)==\}\{>>([\s\S]*?)<<\}/g
 
 export type ReviewItem = { kind: 'passage' | 'note'; index: number; text?: string; note: string; done: boolean }
 

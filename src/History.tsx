@@ -1,12 +1,10 @@
 // Version history for one entity, and the project's "Deleted items" list.
 import { useEffect, useState } from 'react'
-import { api, fieldText, RESERVED_FIELDS, type Entity } from './api.ts'
+import { api, fieldText, readable, RESERVED_FIELDS, type Entity } from './api.ts'
 import { Help } from './Help.tsx'
+import { diffWords } from './diff.ts'
 
 type Snapshot = { ts: number; size: number }
-
-// Stored markup as you'd read it: [[Name|id]] links show their name, inline comments just their text.
-const readable = (md: string) => md.replace(/\[\[([^\]|]*)\|[^\]]+\]\]/g, '$1').replace(/\{==([\s\S]+?)==\}\{>>[\s\S]*?<<\}/g, '$1')
 
 const when = (ts: number) => new Date(ts).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
 const formatBytes = (n: number) =>
@@ -17,9 +15,12 @@ type PanelProps = { url: string; beforeRestore: () => Promise<boolean>; onRestor
 export function HistoryPanel({ url, beforeRestore, onRestored, onClose }: PanelProps) {
   const [versions, setVersions] = useState<Snapshot[]>()
   const [picked, setPicked] = useState<{ ts: number; entity: Entity }>()
+  const [comparing, setComparing] = useState(false)
+  const [current, setCurrent] = useState<Entity>() // the saved text now, to compare against
   useEffect(() => void api(url + '/history').then(setVersions), [url])
 
   const pick = async (ts: number) => setPicked({ ts, entity: await api(`${url}/history/${ts}`) })
+  const compare = async (on: boolean) => { setComparing(on); if (on) setCurrent(await api(url)) }
   async function restore() {
     if (!picked || !confirm(`Restore the version from ${when(picked.ts)}?\nYour current text is kept in history, so you can undo this.`)) return
     if (!(await beforeRestore())) return
@@ -44,10 +45,16 @@ export function HistoryPanel({ url, beforeRestore, onRestored, onClose }: PanelP
       </ol>
       {picked && (
         <div className="version-preview">
-          <button onClick={restore}>Restore this version</button>
+          <button onClick={restore}>Restore this version</button>{' '}
+          <label><input type="checkbox" checked={comparing} onChange={(e) => compare(e.target.checked)} /> Compare with now</label>
           <h3>{picked.entity.title}</h3>
           {fields.map(([k, v]) => <div key={k}><small className="muted">{k}:</small> {readable(fieldText(v))}</div>)}
-          <div className="version-body">{readable(picked.entity.body)}</div>
+          {comparing && current ? (
+            <div className="version-body diff" aria-label="Changes since this version">
+              {diffWords(readable(picked.entity.body), readable(current.body)).map((p, i) =>
+                p.op === '=' ? <span key={i}>{p.text}</span> : p.op === '-' ? <del key={i}>{p.text}</del> : <ins key={i}>{p.text}</ins>)}
+            </div>
+          ) : <div className="version-body">{readable(picked.entity.body)}</div>}
         </div>
       )}
     </aside>

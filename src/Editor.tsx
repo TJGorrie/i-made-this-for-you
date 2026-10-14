@@ -8,8 +8,11 @@ import { Backlinks, LinkPreview } from './Links.tsx'
 import { RelationshipList } from './Relationships.tsx'
 import { MapView } from './MapView.tsx'
 import { HistoryPanel } from './History.tsx'
-import { api, fieldText, fingerprint, MANUSCRIPT_TYPES, parseField, parseLink, RESERVED_FIELDS, reviewNotes, uploadImage, type Entity } from './api.ts'
+import { api, fieldText, fingerprint, MANUSCRIPT_TYPES, parseField, parseLink, RESERVED_FIELDS, reviewNotes, STATUSES, uploadImage, type Entity } from './api.ts'
 import { Comment, commentRanges } from './comment.ts'
+import { Focus } from './focus.ts'
+import { Overused } from './overused.ts'
+import { ageAt } from './continuity.ts'
 import { ReviewMargin, ReviewPanel, type Draft } from './Review.tsx'
 
 const AUTOSAVE_MS = 800
@@ -20,6 +23,8 @@ type Props = {
   onOpen: (id: string, beside?: boolean) => void // beside: open in the split pane
   onFocusMode?: () => void; onClose?: () => void
   focusItem?: number // select the nth inline comment once loaded (opened from the Review view)
+  born?: Map<string, number> // birth years, to show ages next to linked characters (from the entry's date)
+  highlight?: boolean; onHighlight?: (on: boolean) => void // mark crutch words and -ly adverbs in the text
 }
 type Conflict = { fields: string[]; current: Entity }
 
@@ -33,7 +38,7 @@ export function Editor(props: Props) {
   return loaded ? <Form key={loaded.n} initial={loaded.entity} onReload={load} {...props} /> : null
 }
 
-function Form({ initial, url, fields: specs, targets, onSaved, onDeleted, onOpenType, onOpen, onReload, onFocusMode, onClose, focusItem }: Props & { initial: Entity; onReload: () => void }) {
+function Form({ initial, url, fields: specs, targets, onSaved, onDeleted, onOpenType, onOpen, onReload, onFocusMode, onClose, focusItem, born, highlight, onHighlight }: Props & { initial: Entity; onReload: () => void }) {
   const [values, setValues] = useState(initial)
   const [status, setStatus] = useState('')
   const [showHistory, setShowHistory] = useState(false)
@@ -78,7 +83,7 @@ function Form({ initial, url, fields: specs, targets, onSaved, onDeleted, onOpen
   }, [])
 
   const editor = useEditor({
-    extensions: [StarterKit, Markdown, WikiLink.configure({ targets: () => targetsRef.current }), Comment],
+    extensions: [StarterKit, Markdown, WikiLink.configure({ targets: () => targetsRef.current }), Comment, Focus, Overused],
     content: initial.body,
     contentType: 'markdown',
     onUpdate: () => {
@@ -189,6 +194,7 @@ function Form({ initial, url, fields: specs, targets, onSaved, onDeleted, onOpen
   const extra = Object.keys(values)
     .filter((k) => !RESERVED_FIELDS.includes(k) && !fields.some((f) => f.name === k) && typeof values[k] !== 'object')
     .map((name) => ({ name, linkType: undefined, multiple: false }))
+  const ageOf = (id: string) => { const a = born && ageAt(born, id, fieldText(values.date)); return a === undefined ? '' : `age ${a}` }
   const optionsFor = (linkType: string) => (linkType === '*' ? targets : targets.filter((t) => t.type === linkType))
   const addField = () => {
     const name = prompt('Field name')?.trim()
@@ -205,6 +211,9 @@ function Form({ initial, url, fields: specs, targets, onSaved, onDeleted, onOpen
         <button className="mini focus-hide" onMouseDown={(e) => e.preventDefault()} onClick={comment} title="Comment on the selected text (or edit the comment under the cursor)">Comment</button>
         <button className="mini focus-hide" onClick={() => setReviewing((r) => !r)} aria-pressed={reviewing}
           title="Review mode: make the text read-only while you go through comments">Review</button>
+        <ReadAloud editor={editor} />
+        {onHighlight && <button className="mini focus-hide" onClick={() => onHighlight(!highlight)} aria-pressed={!!highlight}
+          title="Mark crutch words (just, really, suddenly…) and -ly adverbs in the text">Highlight</button>}
         <button className="mini focus-hide" onClick={() => setShowHistory((s) => !s)} aria-pressed={showHistory}>History</button>
         <button className="mini focus-hide" onClick={remove}>Delete</button>
         {onClose && <button className="mini" onClick={onClose} aria-label="Close side pane">×</button>}
@@ -232,10 +241,13 @@ function Form({ initial, url, fields: specs, targets, onSaved, onDeleted, onOpen
               ? <ImageField name={name} value={values[name]} multiple={multiple} assetsUrl={assetsUrl} onChange={(v) => set(name, v)} />
               : linkType && multiple
               ? <LinkListField name={name} value={values[name]} options={optionsFor(linkType)} showType={linkType === '*'}
-                  onChange={(v) => set(name, v)} onOpen={onOpen} />
+                  onChange={(v) => set(name, v)} onOpen={onOpen} note={ageOf} />
               : linkType
               ? <LinkField name={name} value={fieldText(values[name])} options={optionsFor(linkType)}
-                  onChange={(v) => set(name, v)} onOpen={onOpen} />
+                  onChange={(v) => set(name, v)} onOpen={onOpen} note={ageOf} />
+              : name === 'status'
+              ? <><input list="statuses" aria-label={name} value={fieldText(values[name])} onChange={(e) => set(name, e.target.value)} />
+                  <datalist id="statuses">{STATUSES.map((s) => <option key={s} value={s} />)}</datalist></>
               : <textarea rows={1} aria-label={name} value={fieldText(values[name])} onChange={(e) => set(name, e.target.value)} />}
           </div>
         ))}
@@ -275,7 +287,7 @@ function Form({ initial, url, fields: specs, targets, onSaved, onDeleted, onOpen
         <ReviewMargin editor={editor} />
       </div>
       {hover && <LinkPreview key={hover.id} url={url.replace(/[^/]+$/, hover.id)} x={hover.x} y={hover.y} />}
-      <Backlinks url={url} onOpen={onOpen} />
+      <Backlinks url={url} onOpen={onOpen} unlinked={!MANUSCRIPT_TYPES.includes(values.type)} />
     </div>
   )
 }
@@ -316,8 +328,9 @@ function ImageField({ name, value, multiple, assetsUrl, onChange }: {
 }
 
 // A field holding a list of [[links]] (e.g. characters appearing in a scene): chips plus an "add" dropdown.
-function LinkListField({ name, value, options, showType, onChange, onOpen }: {
+function LinkListField({ name, value, options, showType, onChange, onOpen, note }: {
   name: string; value: unknown; options: LinkTarget[]; showType: boolean; onChange: (v: string[]) => void; onOpen: (id: string) => void
+  note: (id: string) => string
 }) {
   // Tolerate a single string from a hand-edited file.
   const items = (Array.isArray(value) ? value : fieldText(value) ? [value] : []).map(String)
@@ -328,7 +341,9 @@ function LinkListField({ name, value, options, showType, onChange, onOpen }: {
     <div className="link-list">
       {links.map((l, i) => (
         <span key={i} className="chip">
-          <button className="chip-open" onClick={() => l.link && onOpen(l.link[2])}>{label(l)}</button>
+          <button className="chip-open" onClick={() => l.link && onOpen(l.link[2])}>
+            {label(l)}{l.link && note(l.link[2]) && <small className="muted"> · {note(l.link[2])}</small>}
+          </button>
           <button className="chip-x" aria-label={`Remove ${label(l)}`}
             onClick={() => onChange(items.filter((_, j) => j !== i))}>×</button>
         </span>
@@ -348,8 +363,9 @@ function LinkListField({ name, value, options, showType, onChange, onOpen }: {
 }
 
 // A field holding a [[link]] to one entity of a given type (e.g. a scene's POV character).
-function LinkField({ name, value, options, onChange, onOpen }: {
+function LinkField({ name, value, options, onChange, onOpen, note }: {
   name: string; value: string; options: LinkTarget[]; onChange: (v: string) => void; onOpen: (id: string) => void
+  note: (id: string) => string
 }) {
   const link = parseLink(value)
   const id = link?.[2] ?? ''
@@ -367,6 +383,29 @@ function LinkField({ name, value, options, onChange, onOpen }: {
         {options.map((o) => <option key={o.id} value={o.id}>{o.title}</option>)}
       </select>
       {link && <button className="mini" onClick={() => onOpen(id)}>open</button>}
+      {link && note(id) && <small className="muted">{note(id)}</small>}
     </div>
+  )
+}
+
+// Read the selection aloud, or from the cursor to the end, with the browser's own speech.
+function ReadAloud({ editor }: { editor: ReturnType<typeof useEditor> }) {
+  const [speaking, setSpeaking] = useState(false)
+  useEffect(() => () => speechSynthesis?.cancel(), []) // stop when the entry closes
+  if (!('speechSynthesis' in window)) return null
+  function toggle() {
+    speechSynthesis.cancel()
+    if (speaking || !editor) return setSpeaking(false)
+    const { from, to, empty } = editor.state.selection
+    const text = editor.state.doc.textBetween(from, empty ? editor.state.doc.content.size : to, '\n')
+    if (!text.trim()) return
+    const u = new SpeechSynthesisUtterance(text)
+    u.onend = u.onerror = () => setSpeaking(false)
+    speechSynthesis.speak(u)
+    setSpeaking(true)
+  }
+  return (
+    <button className="mini focus-hide" onMouseDown={(e) => e.preventDefault()} onClick={toggle} aria-pressed={speaking}
+      title="Read the selection aloud, or from the cursor to the end">{speaking ? 'Stop' : 'Read aloud'}</button>
   )
 }

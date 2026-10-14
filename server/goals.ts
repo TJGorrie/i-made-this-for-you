@@ -4,7 +4,8 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { atomicWrite } from './store.ts'
 
-export type Goals = { daily?: number; days: Record<string, { start: number; end: number }> }
+export type Sprint = { at: number; minutes: number; words: number } // timed writing session; at = when it started (ms)
+export type Goals = { daily?: number; deadline?: string; days: Record<string, { start: number; end: number }>; sprints?: Sprint[] }
 
 export const localDate = (d = new Date()) => d.toLocaleDateString('sv-SE') // YYYY-MM-DD in local time
 
@@ -30,4 +31,23 @@ export function streak(g: Goals, date: string) {
   let n = 0
   while (met(localDate(day))) { n++; day.setDate(day.getDate() - 1) }
   return n
+}
+
+// Finish-date projection. Pace = net words a day over the last 14 days (today included);
+// the words left take ceil(left / pace) more days. finish is null while there's no pace to go on.
+export function projection(g: Goals, date: string, total: number, target: number) {
+  const day = new Date(`${date}T12:00:00`)
+  let words = 0
+  for (let i = 0; i < 14; i++, day.setDate(day.getDate() - 1)) {
+    const d = g.days[localDate(day)]
+    if (d) words += d.end - d.start
+  }
+  const left = Math.max(0, target - total)
+  let finish: string | null = left ? null : date
+  if (left && words > 0) {
+    const f = new Date(`${date}T12:00:00`)
+    f.setDate(f.getDate() + Math.ceil((left * 14) / words)) // integers: no float rounding at whole days
+    finish = localDate(f)
+  }
+  return { pace: Math.round(words / 14), left, finish }
 }

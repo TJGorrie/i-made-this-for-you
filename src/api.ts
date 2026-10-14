@@ -16,6 +16,9 @@ export const RESERVED_FIELDS = ['id', 'type', 'title', 'body', 'parent', 'order'
 export const plainText = (md: string) =>
   md.replace(/\[\[([^\]|]*)\|[^\]]+\]\]/g, '$1').replace(/[#>*_`~]+|^-{3,}$/gm, ' ').replace(/\s+/g, ' ').trim()
 
+// Stored markup as you'd read it: [[Name|id]] links show their name, inline comments just their text.
+export const readable = (md: string) => md.replace(/\[\[([^\]|]*)\|[^\]]+\]\]/g, '$1').replace(/\{==([\s\S]+?)==\}\{>>[\s\S]*?<<\}/g, '$1')
+
 // Template field spec:
 //   "pov:character"        → `pov` holds one [[link]] to a character
 //   "appears:character[]"  → `appears` holds a list of links to characters
@@ -29,6 +32,12 @@ export const parseLink = (v: string) => /^\[\[([^\]|]*)\|([^\]]+)\]\]$/.exec(v.t
 
 export const fieldText = (v: unknown): string =>
   Array.isArray(v) ? v.map(fieldText).filter(Boolean).join(', ') : v == null || typeof v === 'object' ? '' : String(v)
+
+// Comma-separated labels, lowercased: event `tags: war, politics`, scene `threads: heist, romance`.
+export const tagList = (v: unknown) => fieldText(v).split(',').map((t) => t.trim().toLowerCase()).filter(Boolean)
+
+// Suggested scene statuses, in workflow order (any other text is allowed too).
+export const STATUSES = ['idea', 'draft', 'revised', 'done']
 
 // Review items. Inline comment notes mark "done" with a [x] prefix ({==text==}{>>[x] note<<});
 // whole-entity notes live in frontmatter as `review: [{ note, done }]`.
