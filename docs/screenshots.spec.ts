@@ -277,8 +277,8 @@ test.describe('gifs', () => {
         const i = n.textContent!.indexOf(text)
         if (i < 0) continue
         const r = document.createRange(); r.setStart(n, i); r.setEnd(n, i + text.length)
-        const b = r.getBoundingClientRect()
-        return { left: b.left, right: b.right, y: b.top + b.height / 2 }
+        const rs = r.getClientRects(), a = rs[0], b = rs[rs.length - 1] // first and last line, if it wraps
+        return { left: a.left, y: a.top + a.height / 2, right: b.right, endY: b.top + b.height / 2 }
       }
       throw new Error(`"${text}" not on screen`)
     }, text)
@@ -290,7 +290,7 @@ test.describe('gifs', () => {
     let stop = record(page, CLIP)
     await pause(600)
     const end = await textRect('straight as a ruled line.')
-    await glide(end.right + 2, end.y); await page.mouse.down(); await page.mouse.up()
+    await glide(end.right + 2, end.endY); await page.mouse.down(); await page.mouse.up()
     await page.keyboard.press('End')
     await page.keyboard.type(' Behind them, on the quay, @grey', { delay: 70 })
     await expect(page.locator('.suggest button').first()).toContainText('the Grey Captain → Captain Rook')
@@ -310,8 +310,8 @@ test.describe('gifs', () => {
     await pause(500)
     const line = await textRect('straight as a ruled line')
     await glide(line.left + 1, line.y); await page.mouse.down()
-    for (let i = 1; i <= 12; i++) { await page.mouse.move(line.left + ((line.right - 1 - line.left) * i) / 12, line.y); await pause(30) }
-    at = { x: line.right - 1, y: line.y }
+    for (let i = 1; i <= 12; i++) { await page.mouse.move(line.left + ((line.right - 1 - line.left) * i) / 12, line.y + ((line.endY - line.y) * i) / 12); await pause(30) }
+    at = { x: line.right - 1, y: line.endY }
     await page.mouse.up()
     await pause(400)
     await clickOn(page.getByRole('button', { name: 'Comment', exact: true }))
