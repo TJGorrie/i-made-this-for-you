@@ -1,25 +1,26 @@
 // Prose stats view: the numbers from prose.ts for one book, plus the words and phrases you repeat most.
-import { useEffect, useState } from 'react'
-import { fieldText, parseLink, type Row } from './api.ts'
-import { dialogueWords, proseStats, proseText, wordsOf, type Count, type ProseStats } from './prose.ts'
+import { useEffect, useMemo, useState } from 'react'
+import { api, readable, type Row } from './api.ts'
+import { CRUTCHES, dialogueWords, proseStats, proseText, wordsOf, type Count, type WordLists } from './prose.ts'
 import { Help } from './Help.tsx'
 
 const byOrder = (a: Row, b: Row) => (a.order ?? 0) - (b.order ?? 0)
 
-export function ProseView({ slug, rows, onSearch }: { slug: string; rows: Row[]; onSearch: (q: string) => void }) {
+export function ProseView({ slug, rows, onSearch, words, onWords }: {
+  slug: string; rows: Row[]; onSearch: (q: string) => void; words: WordLists; onWords: (w: WordLists) => void
+}) {
   const books = rows.filter((r) => r.type === 'book').sort(byOrder)
   const [bookId, setBookId] = useState('')
-  const [stats, setStats] = useState<ProseStats>()
+  const [md, setMd] = useState<string>()
   const [scenes, setScenes] = useState<Scene[]>([])
   const book = books.find((b) => b.id === bookId) ?? books[0]
   useEffect(() => {
     if (!book) return
     const url = `/api/projects/${slug}/books/${book.id}/compile?format=`
-    fetch(url + 'md').then((r) => r.text()).then((md) => setStats(proseStats(md)))
+    fetch(url + 'md').then((r) => r.text()).then(setMd)
     fetch(url + 'scenes').then((r) => r.json()).then(setScenes)
   }, [slug, book?.id, rows])
-  // Flesch reading ease is an English formula.
-  const english = /^en\b|^$/i.test(fieldText(book?.language).trim())
+  const stats = useMemo(() => (md === undefined ? undefined : proseStats(md, words)), [md, words])
   const byId = new Map(rows.map((r) => [r.id, r]))
 
   const list = (title: string, items: Count[], help?: string) => (
@@ -39,9 +40,9 @@ export function ProseView({ slug, rows, onSearch }: { slug: string; rows: Row[];
     <div className="prose-view">
       <h2>Prose stats <Help>
         <span>Numbers for the whole book (scenes only, comments left out), to spot habits while you revise.</span>
-        <span><b>Dialogue</b> is the share of words inside quotation marks. Click any word or phrase to search for it.</span>
-        <span><b>Readability</b> is the Flesch reading ease score (English only): 90+ very easy, 60 to 70 plain English, under 30 hard.</span>
-        <span><b>Dialogue by point of view</b> is how much of each POV character's scenes is dialogue (not who is speaking).</span>
+        <span>Click any word or phrase to search for it.</span>
+        <span><b>Dialogue by speaker</b> counts the lines you've tagged: select a line in a scene and click <b>Speaker</b>.
+          Each character's entry lists everything they say.</span>
       </Help></h2>
       {books.length > 1 && (
         <p><select aria-label="Book" value={book?.id} onChange={(e) => setBookId(e.target.value)}>
@@ -53,61 +54,78 @@ export function ProseView({ slug, rows, onSearch }: { slug: string; rows: Row[];
         <>
           <dl className="prose-numbers">
             <div><dt>Words</dt><dd>{stats.words.toLocaleString()}</dd></div>
-            <div><dt>Sentences</dt><dd>{stats.sentences.toLocaleString()}</dd></div>
-            <div><dt>Average sentence</dt><dd>{stats.avgSentence.toFixed(1)} words</dd></div>
-            <div><dt>Longest sentence</dt><dd>{stats.longestSentence} words</dd></div>
-            <div><dt>Dialogue</dt><dd>{stats.dialogue}%</dd></div>
-            {english && stats.words > 0 && (
-              <div title="Flesch reading ease: higher is easier. Most novels for adults score 70 to 90.">
-                <dt>Readability</dt><dd>{Math.round(stats.flesch)} <small className="muted">{ease(stats.flesch)}</small></dd>
-              </div>
-            )}
           </dl>
-          <DialogueByPov scenes={scenes} byId={byId} />
+          <DialogueBySpeaker scenes={scenes} byId={byId} />
           <div className="prose-lists">
             {list('Most used words', stats.topWords, 'Leaving out common words like "the" and "said".')}
             {list('Repeated phrases', stats.phrases, 'Three-word phrases used three times or more.')}
             {list('-ly adverbs', stats.adverbs)}
-            {list('Words to check', stats.crutches, 'Often cut in revision: just, really, very, suddenly…')}
+            {list('Words to check', stats.crutches, 'Your list of words to look at again. Edit it below.')}
           </div>
         </>
       )}
+      <WordSettings slug={slug} words={words} onSaved={onWords} />
     </div>
   )
 }
 
-type Scene = { id: string; chapter: string; title: string; pov: string; body: string }
+// The project's word lists, one per line: what Prose stats and Highlight check, and -ly words that aren't adverbs.
+function WordSettings({ slug, words, onSaved }: { slug: string; words: WordLists; onSaved: (w: WordLists) => void }) {
+  const [check, setCheck] = useState(words.check.join('\n'))
+  const [notAdverbs, setNotAdverbs] = useState(words.notAdverbs.join('\n'))
+  const [status, setStatus] = useState('')
+  const lines = (s: string) => s.split('\n').map((w) => w.trim()).filter(Boolean)
+  const save = () => api(`/projects/${slug}/words`, 'PUT', { check: lines(check), notAdverbs: lines(notAdverbs) })
+    .then((w) => { onSaved(w); setStatus('Saved') }, (e) => setStatus(e.message))
+  return (
+    <details className="calendar-settings word-settings">
+      <summary>Edit word lists</summary>
+      <label>Words to check, one per line (phrases are fine: "a beat", "nodded")
+        <textarea aria-label="Words to check" rows={8} value={check} onChange={(e) => { setCheck(e.target.value); setStatus('') }} /></label>
+      <label>Not adverbs: -ly words never to flag, one per line (names, invented words)
+        <textarea aria-label="Not adverbs" rows={4} value={notAdverbs} onChange={(e) => { setNotAdverbs(e.target.value); setStatus('') }} /></label>
+      <button onClick={save}>Save lists</button>{' '}
+      <button onClick={() => { setCheck(CRUTCHES.join('\n')); setStatus('') }}>Reset words to check</button> <small>{status}</small>
+    </details>
+  )
+}
 
-const ease = (f: number) => f >= 90 ? 'very easy' : f >= 70 ? 'easy' : f >= 60 ? 'plain English' : f >= 30 ? 'fairly hard' : 'hard'
+type Scene = { id: string; chapter: string; title: string; body: string; lines: { id: string; title: string; text: string }[] }
 
-// Scenes grouped by their POV character: how many, how long, and the share of their words inside quotes.
-function DialogueByPov({ scenes, byId }: { scenes: Scene[]; byId: Map<string, Row> }) {
-  const groups = new Map<string, { title: string; scenes: number; words: number; dialogue: number }>()
+// Tagged dialogue grouped by speaker: lines, words, and their share of all tagged dialogue.
+function DialogueBySpeaker({ scenes, byId }: { scenes: Scene[]; byId: Map<string, Row> }) {
+  const groups = new Map<string, { title: string; lines: number; words: number; scenes: Set<string> }>()
+  let tagged = 0, quoted = 0
   for (const s of scenes) {
-    const link = parseLink(s.pov)
-    const key = link?.[2] ?? ''
-    const text = proseText(s.body)
-    const g = groups.get(key) ?? { title: link ? byId.get(key)?.title ?? link[1] : 'No POV', scenes: 0, words: 0, dialogue: 0 }
-    g.scenes++; g.words += wordsOf(text).length; g.dialogue += dialogueWords(text)
-    groups.set(key, g)
+    quoted += dialogueWords(proseText(s.body))
+    for (const l of s.lines) {
+      const g = groups.get(l.id) ?? { title: byId.get(l.id)?.title ?? l.title, lines: 0, words: 0, scenes: new Set() }
+      const n = wordsOf(readable(l.text)).length
+      g.lines++; g.words += n; g.scenes.add(s.id); tagged += n
+      groups.set(l.id, g)
+    }
   }
   const list = [...groups.values()].sort((a, b) => b.words - a.words)
-  if (!list.length) return null
+  const untagged = Math.max(0, quoted - tagged) // tagged lines may or may not include their quote marks: approximate
   return (
-    <section aria-label="Dialogue by point of view" className="dialogue-pov">
-      <h3>Dialogue by point of view</h3>
-      <table>
-        <tbody>
-          {list.map((g) => (
-            <tr key={g.title}>
-              <td>{g.title}</td>
-              <td className="muted">{g.scenes} scene{g.scenes === 1 ? '' : 's'}</td>
-              <td className="muted">{g.words.toLocaleString()} words</td>
-              <td>{g.words ? Math.round((g.dialogue / g.words) * 100) : 0}% dialogue</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+    <section aria-label="Dialogue by speaker" className="dialogue-pov">
+      <h3>Dialogue by speaker</h3>
+      {!list.length && <p className="muted">No tagged dialogue yet. Select a line in a scene and click Speaker.</p>}
+      {list.length > 0 && (
+        <table>
+          <tbody>
+            {list.map((g) => (
+              <tr key={g.title}>
+                <td>{g.title}</td>
+                <td className="muted">{g.lines} line{g.lines === 1 ? '' : 's'} in {g.scenes.size} scene{g.scenes.size === 1 ? '' : 's'}</td>
+                <td className="muted">{g.words.toLocaleString()} words</td>
+                <td>{Math.round((g.words / tagged) * 100)}% of tagged dialogue</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      {untagged > 0 && <p className="muted">About {untagged.toLocaleString()} word{untagged === 1 ? '' : 's'} of quoted dialogue aren't tagged.</p>}
     </section>
   )
 }

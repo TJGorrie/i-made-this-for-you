@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@hono/node-server": "^2.1.5",
+    "@tiptap/extension-bubble-menu": "^3.32.0",
     "@tiptap/markdown": "^3.32.0",
     "@tiptap/pm": "^3.32.0",
     "@tiptap/react": "^3.32.0",
@@ -37,7 +38,7 @@
     "typescript": "^7.0.2",
     "vite": "^8.3.4"
   },
-  "version": "0.1.1",
+  "version": "0.1.2",
   "license": "SEE LICENSE IN LICENSE",
   "author": "TJGorrie"
 }

@@ -1,17 +1,21 @@
 // Entity editor: title + template fields + rich-text body, autosaved.
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { useEditor, EditorContent } from '@tiptap/react'
+import { BubbleMenu } from '@tiptap/react/menus'
 import StarterKit from '@tiptap/starter-kit'
 import { Markdown } from '@tiptap/markdown'
 import { WikiLink, type LinkTarget } from './wikiLink.ts'
-import { Backlinks, LinkPreview } from './Links.tsx'
+import { Backlinks, Descriptions, LinkPreview, SpokenLines, type Passage } from './Links.tsx'
 import { RelationshipList } from './Relationships.tsx'
 import { MapView } from './MapView.tsx'
 import { HistoryPanel } from './History.tsx'
 import { api, fieldText, fingerprint, MANUSCRIPT_TYPES, parseField, parseLink, RESERVED_FIELDS, reviewNotes, STATUSES, uploadImage, type Entity } from './api.ts'
-import { Comment, commentRanges } from './comment.ts'
+import { Comment, commentRanges, markRanges } from './comment.ts'
+import { Speaker } from './speaker.ts'
+import { Described } from './described.ts'
 import { Focus } from './focus.ts'
 import { Overused } from './overused.ts'
+import { DEFAULT_WORDS, type WordLists } from './prose.ts'
 import { ageAt } from './continuity.ts'
 import { ReviewMargin, ReviewPanel, type Draft } from './Review.tsx'
 
@@ -22,11 +26,15 @@ type Props = {
   onSaved: () => void; onDeleted: () => void; onOpenType: (type: string) => void
   onOpen: (id: string, beside?: boolean) => void // beside: open in the split pane
   onFocusMode?: () => void; onClose?: () => void
-  focusItem?: number // select the nth inline comment once loaded (opened from the Review view)
+  onOpenAt?: (id: string, at: Passage) => void // open an entry with a passage selected
+  focusItem?: Passage // select this passage once loaded (opened from the Review view or a description)
   born?: Map<string, number> // birth years, to show ages next to linked characters (from the entry's date)
-  highlight?: boolean; onHighlight?: (on: boolean) => void // mark crutch words and -ly adverbs in the text
+  highlight?: Highlight; onHighlight?: (h: Highlight) => void // what to mark in the text
+  words?: WordLists // the project's words to check and -ly words not to flag
 }
-type Conflict = { fields: string[]; current: Entity }
+// '': off · words: words to check and -ly adverbs · dialogue: quotes without a tagged speaker
+export type Highlight = '' | 'words' | 'dialogue'
+type Conflict ={ fields: string[]; current: Entity }
 
 const linkAt = (t: EventTarget) => (t as HTMLElement).closest?.<HTMLElement>('[data-wiki-link]')
 
@@ -38,7 +46,7 @@ export function Editor(props: Props) {
   return loaded ? <Form key={loaded.n} initial={loaded.entity} onReload={load} {...props} /> : null
 }
 
-function Form({ initial, url, fields: specs, targets, onSaved, onDeleted, onOpenType, onOpen, onReload, onFocusMode, onClose, focusItem, born, highlight, onHighlight }: Props & { initial: Entity; onReload: () => void }) {
+function Form({ initial, url, fields: specs, targets, onSaved, onDeleted, onOpenType, onOpen, onOpenAt, onReload, onFocusMode, onClose, focusItem, born, highlight, onHighlight, words }: Props & { initial: Entity; onReload: () => void }) {
   const [values, setValues] = useState(initial)
   const [status, setStatus] = useState('')
   const [showHistory, setShowHistory] = useState(false)
@@ -49,6 +57,8 @@ function Form({ initial, url, fields: specs, targets, onSaved, onDeleted, onOpen
   const [reviewing, setReviewing] = useState(false) // review mode: text read-only
   const targetsRef = useRef(targets) // the @ menu reads the latest list without recreating the editor
   targetsRef.current = targets
+  const wordsRef = useRef(words ?? DEFAULT_WORDS)
+  wordsRef.current = words ?? DEFAULT_WORDS
   // Only changed fields are sent, so a save never overwrites what drag-reorder changed (parent/order).
   const pending = useRef<Record<string, unknown>>({})
   const bodyDirty = useRef(false)
@@ -83,7 +93,9 @@ function Form({ initial, url, fields: specs, targets, onSaved, onDeleted, onOpen
   }, [])
 
   const editor = useEditor({
-    extensions: [StarterKit, Markdown, WikiLink.configure({ targets: () => targetsRef.current }), Comment, Focus, Overused],
+    extensions: [StarterKit, Markdown, WikiLink.configure({ targets: () => targetsRef.current }), Comment,
+      Speaker.configure({ targets: () => targetsRef.current }),
+      Described.configure({ targets: () => targetsRef.current }), Focus, Overused.configure({ words: () => wordsRef.current })],
     content: initial.body,
     contentType: 'markdown',
     onUpdate: () => {
@@ -96,9 +108,9 @@ function Form({ initial, url, fields: specs, targets, onSaved, onDeleted, onOpen
   useEffect(() => editor?.setEditable(!reviewing, false), [editor, reviewing]) // false: not an edit, don't save
 
   useEffect(() => {
-    const r = focusItem === undefined || !editor ? undefined : commentRanges(editor.state.doc)[focusItem]
+    const r = focusItem === undefined || !editor ? undefined : markRanges(editor.state.doc, focusItem.mark)[focusItem.index]
     if (r) editor!.chain().focus().setTextSelection({ from: r.from, to: r.to }).scrollIntoView().run()
-  }, [editor])
+  }, [editor, focusItem]) // focusItem too: jumping to a passage in the entry that's already open
 
   function schedule() {
     if (!conflictRef.current) setStatus('Unsaved')
@@ -178,16 +190,49 @@ function Form({ initial, url, fields: specs, targets, onSaved, onDeleted, onOpen
 
   const assetsUrl = '/api' + url.replace(/entities\/[^/]+$/, 'assets')
 
-  // Select text → Comment opens the note input in the review panel; inside an existing comment it edits that one.
-  // The range is captured now, so focus moving to the input can't lose the selection.
+  // Selecting text opens the bubble menu (Comment / Describe / Speaker). Each captures the range now,
+  // so focus moving to an input can't lose the selection.
+  // Comment opens the note input in the review panel; inside an existing comment it edits that one.
   function comment() {
     if (!editor) return
-    const { from, to, empty } = editor.state.selection
+    const { from, to } = editor.state.selection
     const inside = commentRanges(editor.state.doc).find((r) => r.from <= from && to <= r.to)
-    if (inside) setDraft({ from: inside.from, to: inside.to, note: inside.note, done: inside.done })
-    else if (empty) alert('Select some text to comment on.')
-    else setDraft({ from, to, note: '', done: false })
+    setDraft(inside ? { from: inside.from, to: inside.to, note: inside.note, done: inside.done } : { from, to, note: '', done: false })
   }
+
+  // Speaker: pick who says the selected dialogue.
+  const [tagging, setTagging] = useState<{ from: number; to: number } | null>(null)
+  function setSpeaker(id: string) {
+    const type = editor?.schema.marks.speaker
+    if (!editor || !type || !tagging) return
+    const t = targets.find((t) => t.id === id)
+    const tr = editor.state.tr.removeMark(tagging.from, tagging.to, type)
+    editor.view.dispatch(t ? tr.addMark(tagging.from, tagging.to, type.create({ id: t.id, title: t.title })) : tr)
+    setTagging(null)
+    editor.commands.focus()
+  }
+  // Describe: mark the selected text as describing a property of an entry ("grey eyes" → Ana's eyes).
+  // Inside an existing description it edits that one.
+  type Describing = { from: number; to: number; id: string; prop: string }
+  const [describing, setDescribing] = useState<Describing | null>(null)
+  function describe() {
+    if (!editor) return
+    const { from, to } = editor.state.selection
+    const inside = markRanges(editor.state.doc, 'described').find((r) => r.from <= from && to <= r.to)
+    setDescribing(inside ? { from: inside.from, to: inside.to, id: inside.attrs.id, prop: inside.attrs.prop } : { from, to, id: '', prop: '' })
+  }
+  function setDescribed(id: string, prop: string) { // empty id: remove the description
+    const type = editor?.schema.marks.described
+    if (!editor || !type || !describing) return
+    const t = targets.find((t) => t.id === id)
+    const tr = editor.state.tr.removeMark(describing.from, describing.to, type)
+    editor.view.dispatch(t ? tr.addMark(describing.from, describing.to, type.create({ id: t.id, title: t.title, prop })) : tr)
+    closeMenu()
+  }
+  const menuOpen = useRef(false) // a picker is open in the bubble: keep it shown while focus is in it
+  menuOpen.current = !!tagging || describing !== null
+  const closeMenu = () => { setTagging(null); setDescribing(null); editor?.commands.focus() }
+  const speakers = [...targets].sort((a, b) => +(a.type !== 'character') - +(b.type !== 'character'))
 
   // Template fields first, then any extra text fields this entity has (added here or by hand in the file).
   const fields = specs.map(parseField)
@@ -207,13 +252,16 @@ function Form({ initial, url, fields: specs, targets, onSaved, onDeleted, onOpen
         <button className="link type-link" onClick={() => onOpenType(values.type)}>{values.type}</button>
         <small>{status}</small>
         {onFocusMode && <button className="mini focus-hide" onClick={() => { setReviewing(false); onFocusMode() }} title="Hide everything but the text (Esc to leave)">Focus</button>}
-        {/* preventDefault on mousedown: the click mustn't take focus (and the selection) away from the text. */}
-        <button className="mini focus-hide" onMouseDown={(e) => e.preventDefault()} onClick={comment} title="Comment on the selected text (or edit the comment under the cursor)">Comment</button>
         <button className="mini focus-hide" onClick={() => setReviewing((r) => !r)} aria-pressed={reviewing}
           title="Review mode: make the text read-only while you go through comments">Review</button>
-        <ReadAloud editor={editor} />
-        {onHighlight && <button className="mini focus-hide" onClick={() => onHighlight(!highlight)} aria-pressed={!!highlight}
-          title="Mark crutch words (just, really, suddenly…) and -ly adverbs in the text">Highlight</button>}
+        {onHighlight && (
+          <select className="mini focus-hide" aria-label="Highlight in text" value={highlight ?? ''} onChange={(e) => onHighlight(e.target.value as Highlight)}
+            title="Mark words to check (edit the list in Prose stats) or dialogue with no speaker tagged">
+            <option value="">Highlight: off</option>
+            <option value="words">Highlight: words to check</option>
+            <option value="dialogue">Highlight: untagged dialogue</option>
+          </select>
+        )}
         <button className="mini focus-hide" onClick={() => setShowHistory((s) => !s)} aria-pressed={showHistory}>History</button>
         <button className="mini focus-hide" onClick={remove}>Delete</button>
         {onClose && <button className="mini" onClick={onClose} aria-label="Close side pane">×</button>}
@@ -253,6 +301,7 @@ function Form({ initial, url, fields: specs, targets, onSaved, onDeleted, onOpen
         ))}
         <button className="mini add-field" onClick={addField}>+ field</button>
       </div>
+      {!MANUSCRIPT_TYPES.includes(values.type) && onOpenAt && <Descriptions url={url} onOpenAt={onOpenAt} reload={targets} />}
       <ReviewPanel editor={editor} notes={reviewNotes(values.review)} onNotes={(n) => set('review', n)} draft={draft} onDraft={setDraft} />
       {values.type === 'map' && (
         <MapView
@@ -284,9 +333,39 @@ function Form({ initial, url, fields: specs, targets, onSaved, onDeleted, onOpen
         }}
       >
         <EditorContent editor={editor} className="prose" />
+        {editor && (
+          // Custom shouldShow: the default hides in review mode (read-only), where commenting must still work.
+          <BubbleMenu editor={editor} className="bubble-menu"
+            shouldShow={({ view, state, element }) =>
+              view.dom.closest('.app.focus') ? false // focus mode: no popups
+                : element.contains(document.activeElement) ? menuOpen.current
+                : !state.selection.empty && view.dom.contains(getSelection()?.anchorNode ?? null) && !!state.doc.textBetween(state.selection.from, state.selection.to).trim()}>
+            <div className="bubble-row" onKeyDown={(e) => e.key === 'Escape' && closeMenu()}>
+              {tagging ? (
+                <select autoFocus aria-label="Who says it" value="" onChange={(e) => setSpeaker(e.target.value)} onBlur={() => setTagging(null)}>
+                  <option value="">Who says it…</option>
+                  <option value="-">(not tagged)</option>
+                  {speakers.map((t) => <option key={t.id} value={t.id}>{t.type === 'character' ? t.title : `${t.title} (${t.type})`}</option>)}
+                </select>
+              ) : describing !== null ? (
+                <DescribeForm initial={describing} url={url} targets={targets.filter((t) => t.id !== values.id)} onSave={setDescribed} />
+              ) : (
+                // preventDefault on mousedown: the click mustn't take focus (and the selection) away from the text.
+                <span onMouseDown={(e) => e.preventDefault()}>
+                  <button className="mini" onClick={comment} title="Comment on the selected text (or edit the comment it's in)">Comment</button>
+                  {!reviewing && <button className="mini" title="Add the selected text to a property of an entry"
+                    onClick={describe}>Describe</button>}
+                  {!reviewing && MANUSCRIPT_TYPES.includes(values.type) && <button className="mini" title="Tag the selected dialogue with who says it"
+                    onClick={() => setTagging({ from: editor.state.selection.from, to: editor.state.selection.to })}>Speaker</button>}
+                </span>
+              )}
+            </div>
+          </BubbleMenu>
+        )}
         <ReviewMargin editor={editor} />
       </div>
       {hover && <LinkPreview key={hover.id} url={url.replace(/[^/]+$/, hover.id)} x={hover.x} y={hover.y} />}
+      {!MANUSCRIPT_TYPES.includes(values.type) && <SpokenLines url={url} onOpen={onOpen} />}
       <Backlinks url={url} onOpen={onOpen} unlinked={!MANUSCRIPT_TYPES.includes(values.type)} />
     </div>
   )
@@ -388,24 +467,31 @@ function LinkField({ name, value, options, onChange, onOpen, note }: {
   )
 }
 
-// Read the selection aloud, or from the cursor to the end, with the browser's own speech.
-function ReadAloud({ editor }: { editor: ReturnType<typeof useEditor> }) {
-  const [speaking, setSpeaking] = useState(false)
-  useEffect(() => () => speechSynthesis?.cancel(), []) // stop when the entry closes
-  if (!('speechSynthesis' in window)) return null
-  function toggle() {
-    speechSynthesis.cancel()
-    if (speaking || !editor) return setSpeaking(false)
-    const { from, to, empty } = editor.state.selection
-    const text = editor.state.doc.textBetween(from, empty ? editor.state.doc.content.size : to, '\n')
-    if (!text.trim()) return
-    const u = new SpeechSynthesisUtterance(text)
-    u.onend = u.onerror = () => setSpeaking(false)
-    speechSynthesis.speak(u)
-    setSpeaking(true)
-  }
+// Bubble menu → Describe: pick an entry and a property. The entry then lists this passage under that property.
+function DescribeForm({ initial, url, targets, onSave }: {
+  initial: { id: string; prop: string }; url: string; targets: LinkTarget[]; onSave: (id: string, prop: string) => void
+}) {
+  const [id, setId] = useState(initial.id)
+  const [prop, setProp] = useState(initial.prop)
+  const [keys, setKeys] = useState<string[]>([]) // the chosen entry's text fields and described properties, as suggestions
+  useEffect(() => {
+    setKeys([])
+    const entityUrl = url.replace(/[^/]+$/, id)
+    if (id) Promise.all([api(entityUrl), api(entityUrl + '/descriptions')]).then(([e, ds]: [Entity, { prop: string }[]]) => setKeys([...new Set([
+      ...Object.keys(e).filter((k) => !RESERVED_FIELDS.includes(k) && (e[k] == null || typeof e[k] !== 'object')), ...ds.map((d) => d.prop),
+    ])]))
+  }, [id])
+  const save = (e: FormEvent) => { e.preventDefault(); if (id && prop.trim()) onSave(id, prop.trim()) }
   return (
-    <button className="mini focus-hide" onMouseDown={(e) => e.preventDefault()} onClick={toggle} aria-pressed={speaking}
-      title="Read the selection aloud, or from the cursor to the end">{speaking ? 'Stop' : 'Read aloud'}</button>
+    <form className="describe" onSubmit={save}>
+      <select autoFocus aria-label="Entry" value={id} onChange={(e) => setId(e.target.value)}>
+        <option value="">Describe whom…</option>
+        {targets.map((t) => <option key={t.id} value={t.id}>{`${t.title} (${t.type})`}</option>)}
+      </select>
+      <input aria-label="Property" placeholder="property, e.g. eyes" list="describe-keys" value={prop} onChange={(e) => setProp(e.target.value)} />
+      <datalist id="describe-keys">{keys.map((k) => <option key={k} value={k} />)}</datalist>
+      <button className="mini" disabled={!id || !prop.trim()}>{initial.id ? 'Save' : 'Add'}</button>
+      {initial.id && <button type="button" className="mini" onClick={() => onSave('', '')}>Remove</button>}
+    </form>
   )
 }

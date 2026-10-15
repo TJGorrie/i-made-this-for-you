@@ -26,6 +26,8 @@ Mark each scene as an idea, draft, revised or done, and see it at a glance in th
 
 The Corkboard shows your scenes as index cards, one column per chapter. Write a one-line synopsis on each card and drag cards to reorder them. Give scenes plot threads (`heist, romance`) and pick one to see where it runs through the book, or pick a status or point-of-view character.
 
+![The corkboard, picking out the "marsh" thread and then the "tithe" thread](docs/img/corkboard.gif)
+
 ## Keep your world straight
 
 Every character, place, faction and item gets its own entry, with a portrait, the details you care about, and who they're connected to. Each entry also lists every scene it appears in, automatically.
@@ -48,15 +50,33 @@ Upload a map of your world and pin your places on it.
 
 ## Edit like an editor
 
-Select any passage and add a comment. Comments sit beside the text, and every one is a to-do item you can tick off. Turn on Review mode to read through without changing anything by accident.
+Select any passage and a small menu pops up: **Comment**, **Describe** or **Speaker**.
+
+**Comment** puts a note beside the text. Every comment is a to-do item you can tick off. Turn on Review mode to read through without changing anything by accident.
 
 ![Selecting a passage, adding a comment that appears beside it, then ticking it off](docs/img/comments.gif)
+
+**Describe** files a detail away while you write. Select "in a grey coat", pick Captain Rook and the property `appearance`, and it's listed on his entry, linked back to the passage, so editing the scene keeps it current. No more hunting back through chapters for what colour someone's eyes were.
+
+![Describing Captain Rook's appearance with "in a grey coat", then clicking it in his entry to jump back to the scene](docs/img/describe.gif)
 
 The Review page gathers every open comment and note in the book, in reading order, so nothing slips through. Click one to jump straight to that passage.
 
 ![Ticking off a note on the Review page, then clicking a comment to jump to it in the scene](docs/img/review.gif)
 
-Prose stats shows your average sentence length, how much of the book is dialogue, and the words, phrases and -ly adverbs you lean on most. Click one to find every place you used it.
+## Hear every voice
+
+Select a line of dialogue and choose **Speaker** to tag who says it. Each character's entry then lists everything they say, scene by scene, so you can read a voice straight through and rework it.
+
+![Tagging "We don't have it." as Mara's line, then opening Mara's entry to read all her lines](docs/img/speaker.gif)
+
+Prose stats shows how much each character speaks, and the words, phrases and -ly adverbs you lean on most. Click one to find every place you used it.
+
+![Prose stats: dialogue by speaker and most used words; clicking a word searches the book for it](docs/img/prose.gif)
+
+Keep your own list of words to check ("nodded", "a beat") under Prose stats. Then use **Highlight** above any scene to mark those words as you write, or to show the dialogue you haven't tagged yet.
+
+![Switching Highlight to "words to check", then to "untagged dialogue", then off](docs/img/highlight.gif)
 
 ## Focus when you need to
 
@@ -126,6 +146,10 @@ The app opens in your web browser at http://127.0.0.1:5170. If you open it again
 Your projects go in `Documents/IMadeThisForYou`. To use a different folder, change it under Settings on the projects page. A synced folder such as Dropbox, OneDrive or iCloud Drive is a good way to keep a backup.
 
 Changing the folder doesn't move the projects you already have. Copy their folders into the new one yourself.
+
+## Support
+
+This software is free, and if you paid for it you've been scammed. If you'd like to support me, please [buy me a coffee](https://ko-fi.com/tgorrie)!
 
 ## License
 

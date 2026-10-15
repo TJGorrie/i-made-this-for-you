@@ -20,7 +20,26 @@ export function LinkPreview({ url, x, y }: { url: string; x: number; y: number }
   )
 }
 
-type Backlink = Row & { field: string; label: string | null }
+// Everything this entry says: dialogue tagged with it as the speaker, scene by scene in reading order.
+export function SpokenLines({ url, onOpen }: { url: string; onOpen: (id: string) => void }) {
+  const [scenes, setScenes] = useState<{ id: string; title: string; lines: string[] }[]>([])
+  useEffect(() => void api(url + '/lines').then(setScenes), [url])
+  if (!scenes.length) return null
+  const total = scenes.reduce((n, s) => n + s.lines.length, 0)
+  return (
+    <details className="spoken-lines" aria-label="Lines">
+      <summary><h4>Lines <small className="muted">{total} in {scenes.length} scene{scenes.length === 1 ? '' : 's'}</small></h4></summary>
+      {scenes.map((s) => (
+        <section key={s.id}>
+          <button className="link" onClick={() => onOpen(s.id)}>{s.title}</button>
+          <ul>{s.lines.map((l, i) => <li key={i}>{readable(l)}</li>)}</ul>
+        </section>
+      ))}
+    </details>
+  )
+}
+
+type Backlink = Row &{ field: string; label: string | null }
 
 // Which footer section a link belongs to, by the field it lives in on the linking entity.
 // `appears` and `pov` are the scene template's field names; any other field or the body counts as a mention.
@@ -85,5 +104,35 @@ export function Backlinks({ url, onOpen, unlinked }: { url: string; onOpen: (id:
         </section>
       )}
     </footer>
+  )
+}
+
+// This entry's properties as described in the text (select a passage → Describe), grouped by property.
+// Each links to its passage, so editing the text there is how a description changes.
+export type Passage = { mark: string; index: number } // the nth stretch with this mark, to select when an entry opens
+type Description = { from: string; fromTitle: string; prop: string; text: string; index: number }
+// reload: changes whenever the project's entries are refreshed (after any save), so a side pane stays current.
+export function Descriptions({ url, onOpenAt, reload }: { url: string; onOpenAt: (id: string, at: Passage) => void; reload: unknown }) {
+  const [list, setList] = useState<Description[]>([])
+  useEffect(() => void api(url + '/descriptions').then(setList), [url, reload])
+  if (!list.length) return null
+  const props = [...new Set(list.map((d) => d.prop))]
+  return (
+    <section className="descriptions" aria-label="Described in the text">
+      <h4>Described in the text</h4>
+      {props.map((p) => (
+        <div key={p} className="field-row">
+          <span>{p}</span>
+          <div>
+            {list.filter((d) => d.prop === p).map((d) => (
+              <button key={`${d.from}:${d.index}`} className="link" title={`Go to the passage in ${d.fromTitle}`}
+                onClick={() => onOpenAt(d.from, { mark: 'described', index: d.index })}>
+                {readable(d.text)} <small className="muted">· {d.fromTitle}</small>
+              </button>
+            ))}
+          </div>
+        </div>
+      ))}
+    </section>
   )
 }

@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { aliasesOf, api, MANUSCRIPT_TYPES, type Calendar, type Row } from './api.ts'
-import { Editor } from './Editor.tsx'
+import { Editor, type Highlight } from './Editor.tsx'
+import type { Passage } from './Links.tsx'
+import { DEFAULT_WORDS, type WordLists } from './prose.ts'
 import { Manuscript } from './Manuscript.tsx'
 import { Board } from './Board.tsx'
 import { ProseView } from './Prose.tsx'
@@ -18,7 +20,7 @@ import { Cast } from './Cast.tsx'
 import { Drafts } from './Drafts.tsx'
 import { birthYears, type Link } from './continuity.ts'
 
-type Project = { name: string; templates: Record<string, string[]>; calendar?: Calendar }
+type Project = { name: string; templates: Record<string, string[]>; calendar?: Calendar; words?: WordLists }
 type Tool = 'board' | 'timeline' | 'graph' | 'templates' | 'deleted' | 'log' | 'review' | 'prose' | 'cast' | 'drafts'
 
 
@@ -110,6 +112,10 @@ function Settings({ onFolder }: { onFolder: (dir: string) => void }) {
       </p>
       {settings.locked && <p className="muted">Set by the PROJECTS_DIR environment variable.</p>}
       {message && <p>{message}</p>}
+      <p className="muted">
+        This software is free, and if you paid for it you've been scammed. If you'd like to support me, please{' '}
+        <a href="https://ko-fi.com/tgorrie" target="_blank" rel="noreferrer">buy me a coffee</a>!
+      </p>
       {settings.packaged && (
         <>
           <p><button onClick={() => api('/quit', 'POST').then(() => setStopped(true), (e) => setMessage(e.message))}>Quit IMadeThisForYou</button></p>
@@ -133,14 +139,14 @@ function ProjectView({ slug, onClose }: { slug: string; onClose: () => void }) {
   const [tool, setTool] = useState<Tool | null>(null)
   const [focus, setFocus] = useState(false)
   const [review, setReview] = useState<ReviewEntry[]>([])
-  const [focusItem, setFocusItem] = useState<number>() // inline comment to select when the editor opens
+  const [focusItem, setFocusItem] = useState<Passage>() // passage to select when the editor opens
   const [menu, setMenu] = useState(false) // narrow screens: the sidebar opens over the page
   const [shortcuts, setShortcuts] = useState(false)
   const [links, setLinks] = useState<Link[]>([])
   const [epoch, setEpoch] = useState(0) // bumped when files change behind open editors (find & replace): they reload
   const [typewriter, setTypewriter] = useState(false) // focus mode: keep the caret mid-screen
   const [dim, setDim] = useState(false) // focus mode: fade all but the current paragraph
-  const [highlight, setHighlight] = useState(false) // mark overused words in the text
+  const [highlight, setHighlight] = useState<Highlight>('') // what to mark in the text
   const searchRef = useRef<HTMLInputElement>(null)
   const refresh = async () => {
     const [r, rv, l] = await Promise.all([api(`/projects/${slug}/entities`), api(`/projects/${slug}/review`), api(`/projects/${slug}/links`)])
@@ -156,9 +162,11 @@ function ProjectView({ slug, onClose }: { slug: string; onClose: () => void }) {
   }, [slug])
   useEffect(() => {
     if (!focus) return
+    const pm = document.querySelector('.prose .ProseMirror')
+    pm?.setAttribute('spellcheck', 'false') // no red squiggles while writing
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setFocus(false)
     addEventListener('keydown', onKey)
-    return () => removeEventListener('keydown', onKey)
+    return () => { removeEventListener('keydown', onKey); pm?.removeAttribute('spellcheck') }
   }, [focus])
   // Ctrl/⌘+K: search. "?" (when not typing): the shortcuts sheet.
   useEffect(() => {
@@ -183,6 +191,7 @@ function ProjectView({ slug, onClose }: { slug: string; onClose: () => void }) {
     setSelected(id); setTypeView(null); setTool(null); setFocusItem(undefined); setMenu(false)
     if (side === id) setSide(null)
   }
+  const openAt = (id: string, at: Passage) => { open(id); setFocusItem(at) }
   const openType = (t: string) => { setSelected(null); setTypeView(t); setTool(null); setMenu(false) }
   const openTool = (t: Tool | null) => { setSelected(null); setTypeView(null); setTool(t); if (t) setMenu(false) }
   const create = async (type: string) => {
@@ -206,12 +215,14 @@ function ProjectView({ slug, onClose }: { slug: string; onClose: () => void }) {
       born={born}
       highlight={highlight}
       onHighlight={setHighlight}
+      words={project.words}
       url={`/projects/${slug}/entities/${r.id}`}
       fields={project.templates[r.type] ?? []}
       onSaved={refresh}
       onDeleted={() => { if (inSide) setSide(null); else openType(r.type); refresh() }}
       onOpenType={openType}
       onOpen={open}
+      onOpenAt={openAt}
       targets={targets}
       onFocusMode={inSide ? undefined : () => setFocus(true)}
       onClose={inSide ? () => setSide(null) : undefined}
@@ -223,7 +234,7 @@ function ProjectView({ slug, onClose }: { slug: string; onClose: () => void }) {
   )
 
   return (
-    <div className={`app ${focus ? 'focus' : ''} ${menu ? 'menu-open' : ''} ${typewriter ? 'typewriter' : ''} ${dim ? 'dim' : ''} ${highlight ? 'highlight' : ''}`}>
+    <div className={`app ${focus ? 'focus' : ''} ${menu ? 'menu-open' : ''} ${typewriter ? 'typewriter' : ''} ${dim ? 'dim' : ''} ${highlight ? `highlight-${highlight}` : ''}`}>
       <button className="mini menu-toggle" aria-expanded={menu} onClick={() => setMenu(!menu)}>☰ {project.name}</button>
       <aside>
         <div className="aside-head">
@@ -288,10 +299,11 @@ function ProjectView({ slug, onClose }: { slug: string; onClose: () => void }) {
             <TemplateEditor slug={slug} templates={project.templates} onSaved={(templates) => setProject({ ...project, templates })} />
           )}
           {tool === 'log' && <WritingLog slug={slug} />}
-          {tool === 'prose' && <ProseView slug={slug} rows={rows} onSearch={(q) => { setQuery(q); openTool(null) }} />}
+          {tool === 'prose' && <ProseView slug={slug} rows={rows} onSearch={(q) => { setQuery(q); openTool(null) }}
+            words={project.words ?? DEFAULT_WORDS} onWords={(words) => setProject({ ...project, words })} />}
           {tool === 'review' && (
             <ReviewView slug={slug} rows={rows} review={review} refresh={refresh}
-              onOpen={(id, item) => { open(id); setFocusItem(item) }} />
+              onOpen={(id, item) => item === undefined ? open(id) : openAt(id, { mark: 'comment', index: item })} />
           )}
           {tool === 'deleted' && <DeletedItems slug={slug} onRestored={async (id) => { await refresh(); open(id) }} />}
           {query.trim() && !current && !typeView && !tool && <SearchResults slug={slug} q={query} onOpen={open} onReplaced={() => { setEpoch((n) => n + 1); refresh() }} />}

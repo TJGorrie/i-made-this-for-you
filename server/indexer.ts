@@ -4,7 +4,7 @@ import path from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { readEntity, STALE_TMP, type Entity } from './store.ts'
 import { reviewItems } from './review.ts'
-import { aliasesOf, linkText } from '../src/api.ts'
+import { aliasesOf, linkText, stripTags } from '../src/api.ts'
 
 const CONTENT_DIRS = ['manuscript', 'wiki']
 const toRel = (p: string) => p.split(path.sep).join('/')
@@ -30,10 +30,11 @@ export function linkTargets(e: Entity): Link[] {
 const stripLinks = (md: string) => md.replace(LINK, '$1')
 // Inline comments ({==text==}{>>note<<}, see src/comment.ts) → just the text. Notes aren't manuscript.
 export const stripComments = (md: string) => md.replace(/\{==([\s\S]+?)==\}\{>>[\s\S]*?<<\}/g, '$1')
-export const countWords = (md: string) => stripLinks(stripComments(md)).match(/[\p{L}\p{N}][\p{L}\p{N}'’-]*/gu)?.length ?? 0
+export const countWords = (md: string) => stripLinks(stripComments(stripTags(md))).match(/[\p{L}\p{N}][\p{L}\p{N}'’-]*/gu)?.length ?? 0
 
-// Find & replace and unlinked mentions only look at the prose itself: never inside a [[link]] or a comment's note.
-const PROTECTED = /\[\[[^\]|]*\|[^\]]+\]\]|\{>>[\s\S]*?<<\}/g
+// Find & replace and unlinked mentions only look at the prose itself: never inside a [[link]], a comment's note
+// or a description's property name.
+const PROTECTED = /\{#\[\[[^\]|]*\|[^\]]+\]\]:[^}]*\}|\[\[[^\]|]*\|[^\]]+\]\]|\{>>[\s\S]*?<<\}/g
 export type Match = { at: number; text: string }
 
 // Literal text as a pattern (any of several, longest first); wholeWord: not part of a longer word.

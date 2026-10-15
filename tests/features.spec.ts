@@ -216,7 +216,7 @@ test('focus mode: dim all but the current paragraph, typewriter toggle', async (
   await expect(page.locator('.ProseMirror p.current')).toHaveText('Two lines.')
   await expect(page.locator('.ProseMirror p').first()).toHaveCSS('opacity', '0.3')
   await expect(page.locator('.ProseMirror p.current')).toHaveCSS('opacity', '1')
-  await expect(page.getByRole('button', { name: 'Read aloud' })).toBeHidden() // toolbar buttons hide in focus mode
+  await expect(page.getByRole('button', { name: 'History' })).toBeHidden() // toolbar buttons hide in focus mode
   await page.screenshot({ path: 'test-results/focus-dim.png' })
 })
 
@@ -252,15 +252,90 @@ test('corkboard pacing chart and story beats', async ({ page }) => {
   await expect(page.getByLabel('Title')).toHaveValue('Dock')
 })
 
-test('prose stats: readability and dialogue by point of view', async ({ page }) => {
-  const { slug, req, P, ana, dock } = await setup(page, 'dialogue')
-  await req('put', `${P}/${dock.id}`, { pov: `[[Ana|${ana.id}]]`, body: '"Hello there," she said. Quiet water.' })
+test('tag dialogue with its speaker: saved, counted per speaker, listed on the character', async ({ page }) => {
+  const { slug, req, P, dock } = await setup(page, 'dialogue')
+  await req('put', `${P}/${dock.id}`, { body: '"Hello there," she said. "Bye." Quiet water.' })
   await openProject(page, slug)
+  await page.locator('.tree-item', { hasText: 'Dock' }).click()
+  await page.locator('.ProseMirror p').first().click()
+  // Select '"Hello there,"' (the first 14 characters).
+  await page.locator('.ProseMirror p').first().evaluate((p) => {
+    const text = document.createTreeWalker(p, NodeFilter.SHOW_TEXT).nextNode()! // inside the untagged-dialogue decoration
+    const r = document.createRange()
+    r.setStart(text, 0); r.setEnd(text, 14)
+    getSelection()!.removeAllRanges(); getSelection()!.addRange(r)
+  })
+  await expect.poll(() => page.evaluate(() => getSelection()!.toString())).toBe('"Hello there,"')
+  await page.getByRole('button', { name: 'Speaker' }).click()
+  await page.getByLabel('Who says it').selectOption({ label: 'Ana' })
+  await expect(page.locator('.ProseMirror .speaker')).toHaveText('"Hello there,"')
+  await expect.poll(() => readFile(`${slug}/manuscript/book/one/dock.md`)).toMatch(/\{%"Hello there,"%\}\{@\[\[Ana\|[^\]]+\]\]\} she said\./)
+
   await page.getByRole('button', { name: 'Prose stats' }).click()
-  await expect(page.locator('.prose-numbers')).toContainText('Readability')
-  const table = page.getByRole('region', { name: 'Dialogue by point of view' })
-  await expect(table.locator('tr', { hasText: 'Ana' })).toHaveText(/Ana\s*1 scene\s*6 words\s*33% dialogue/)
-  await expect(table.locator('tr', { hasText: 'No POV' })).toContainText('0% dialogue')
+  const table = page.getByRole('region', { name: 'Dialogue by speaker' })
+  await expect(table.locator('tr', { hasText: 'Ana' })).toHaveText(/Ana\s*1 line in 1 scene\s*2 words\s*100% of tagged dialogue/)
+  await expect(table).toContainText("About 1 word of quoted dialogue aren't tagged")
+
+  await page.locator('aside').getByRole('button', { name: 'Ana', exact: true }).click()
+  const lines = page.locator('.spoken-lines')
+  await expect(lines).toContainText('1 in 1 scene')
+  await lines.locator('summary').click()
+  await expect(lines.locator('li')).toHaveText('"Hello there,"')
+})
+
+test('describe an entry from selected text: marked in the scene, listed on the entry, linked back', async ({ page }) => {
+  const { slug, req, P, dock, ana } = await setup(page, 'describe')
+  await req('put', `${P}/${dock.id}`, { body: 'Her grey eyes narrowed. She wore a red coat.' })
+  await openProject(page, slug)
+  await page.locator('.tree-item', { hasText: 'Dock' }).click()
+  await expect(page.locator('.statusbar')).not.toContainText('Read aloud')
+  const select = async (text: string) => {
+    await page.locator('.ProseMirror p').first().click()
+    await page.locator('.ProseMirror p').first().evaluate((p, text) => {
+      const walk = document.createTreeWalker(p, NodeFilter.SHOW_TEXT)
+      let node: Node | null
+      while ((node = walk.nextNode()) && !node.textContent!.includes(text));
+      const at = node!.textContent!.indexOf(text)
+      const r = document.createRange()
+      r.setStart(node!, at); r.setEnd(node!, at + text.length)
+      getSelection()!.removeAllRanges(); getSelection()!.addRange(r)
+    }, text)
+    await page.locator('.bubble-menu').getByRole('button', { name: 'Describe' }).click()
+  }
+  const describe = async (text: string, prop: string) => {
+    await select(text)
+    await page.getByLabel('Entry').selectOption({ label: 'Ana (character)' })
+    await page.getByLabel('Property').fill(prop)
+    await page.getByLabel('Property').press('Enter')
+    await expect(page.getByLabel('Property')).toBeHidden()
+  }
+  const scene = () => readFile(`${slug}/manuscript/book/one/dock.md`)
+  await describe('grey eyes', 'look')
+  await describe('red coat', 'look')
+  await expect(page.locator('.ProseMirror .described')).toHaveText(['grey eyes', 'red coat'])
+  await expect.poll(scene).toContain(`Her {^grey eyes^}{#[[Ana|${ana.id}]]:look} narrowed. She wore a {^red coat^}{#[[Ana|${ana.id}]]:look}.`)
+
+  // Ana's entry lists them from the text; each goes back to its passage.
+  await page.locator('aside').getByRole('button', { name: 'Ana', exact: true }).click()
+  const list = page.getByRole('region', { name: 'Described in the text' })
+  await expect(list).toContainText('look')
+  await expect(list.getByRole('button')).toHaveText(['grey eyes · Dock', 'red coat · Dock'])
+  await list.getByRole('button', { name: 'red coat · Dock' }).click()
+  await expect(page.getByLabel('Title')).toHaveValue('Dock')
+  await expect.poll(() => page.evaluate(() => getSelection()!.toString())).toBe('red coat')
+
+  // Selecting a described passage edits that description: re-file it, then remove one.
+  await page.locator('.bubble-menu').getByRole('button', { name: 'Describe' }).click()
+  await expect(page.getByLabel('Property')).toHaveValue('look')
+  await page.getByLabel('Property').fill('clothes')
+  await page.getByRole('button', { name: 'Save' }).click()
+  await expect.poll(scene).toContain(`{^red coat^}{#[[Ana|${ana.id}]]:clothes}`)
+  await select('grey eyes')
+  await page.getByRole('button', { name: 'Remove' }).click()
+  await expect.poll(scene).toContain('Her grey eyes narrowed.')
+  await page.locator('aside').getByRole('button', { name: 'Ana', exact: true }).click()
+  await expect(list.getByRole('button')).toHaveText(['red coat · Dock'])
+  await expect(list).toContainText('clothes')
 })
 
 test('highlight overused words while writing (light and dark)', async ({ page }) => {
@@ -271,10 +346,32 @@ test('highlight overused words while writing (light and dark)', async ({ page })
   const marks = page.locator('.ProseMirror .overused')
   await expect(marks).toHaveText(['Suddenly', 'quickly', 'really'])
   await expect(marks.first()).not.toHaveCSS('text-decoration-style', 'wavy') // off by default
-  await page.getByRole('button', { name: 'Highlight' }).click()
+  await page.getByLabel('Highlight in text').selectOption('words')
   await expect(marks.first()).toHaveCSS('text-decoration-style', 'wavy')
   await expect(marks.nth(1)).toHaveAttribute('title', '-ly adverb')
   await page.screenshot({ path: 'test-results/overused-light.png' })
   await page.emulateMedia({ colorScheme: 'dark' })
   await page.screenshot({ path: 'test-results/overused-dark.png' })
+})
+
+test('highlight untagged dialogue; edit the words-to-check list', async ({ page }) => {
+  const { slug, req, P, ana, gate } = await setup(page, 'untagged')
+  await req('put', `${P}/${gate.id}`, { body: `{%"Run."%}{@[[Ana|${ana.id}]]} "Where?" He nodded. A beat.` })
+  await openProject(page, slug)
+  await page.locator('aside').getByRole('button', { name: 'Gate', exact: true }).click()
+  const untagged = page.locator('.ProseMirror .untagged')
+  await expect(untagged).toHaveText(['"Where?"']) // the tagged line isn't marked
+  await page.getByLabel('Highlight in text').selectOption('dialogue')
+  await expect(untagged.first()).not.toHaveCSS('background-color', 'rgba(0, 0, 0, 0)')
+  await expect(page.locator('.ProseMirror .overused')).toHaveCount(0) // nothing on the default list here
+
+  await page.getByRole('button', { name: 'Prose stats' }).click()
+  await page.getByText('Edit word lists').click()
+  await page.getByLabel('Words to check').fill('nodded\na beat')
+  await page.getByRole('button', { name: 'Save lists' }).click()
+  await expect(page.locator('.prose-list', { hasText: 'Words to check' })).toContainText('a beat 1')
+  expect(JSON.parse(readFile(`${slug}/project.json`)).words.check).toEqual(['nodded', 'a beat'])
+
+  await page.locator('aside').getByRole('button', { name: 'Gate', exact: true }).click()
+  await expect(page.locator('.ProseMirror .overused')).toHaveText(['nodded', 'A beat'])
 })

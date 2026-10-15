@@ -18,7 +18,7 @@ import {
 } from './indexer.ts'
 import { marked } from 'marked'
 import { createHash } from 'node:crypto'
-import { aliasesOf, fieldText, RESERVED_FIELDS, reviewNotes } from '../src/api.ts'
+import { aliasesOf, fieldText, RESERVED_FIELDS, reviewNotes, descriptions, speakerLines, stripTags } from '../src/api.ts'
 import { setInline } from './review.ts'
 import { docx, docxToMarkdown, epub, importMarkdown, langOf, unzip, zip, type Book } from './export.ts'
 import { locked, packaged, projectsDir, setProjectsDir } from './settings.ts'
@@ -199,6 +199,43 @@ app.get('/projects/:p/entities/:id', (c) => {
 app.get('/projects/:p/entities/:id/backlinks', (c) => {
   const { db } = project(c.req.param('p'))
   return c.json(backlinks(db, c.req.param('id')))
+})
+
+// Everything this entry says (dialogue tagged with it as the speaker), scene by scene in reading order.
+const fieldsOf = (db: DatabaseSync, id: string) =>
+  JSON.parse((db.prepare('select fields from entities where id = ?').get(id) as { fields: string } | undefined)?.fields ?? '{}')
+function readingKey(db: DatabaseSync, id: string) {
+  const key: number[] = []
+  for (let f = fieldsOf(db, id), depth = 0; depth < 4; depth++) { // scene → chapter → book
+    key.unshift(f.order ?? 0)
+    if (!f.parent) break
+    f = fieldsOf(db, f.parent)
+  }
+  return key
+}
+const byKey = (a: number[], b: number[]) => a.reduce((d, n, i) => d || n - (b[i] ?? 0), 0) || a.length - b.length
+
+// Entries whose text links to this one, in reading order, with their bodies.
+function linkedBodies(dir: string, db: DatabaseSync, id: string) {
+  const from = db.prepare(`select distinct from_id from links where to_id = ? and field = 'body'`).all(id) as { from_id: string }[]
+  return from.map((l) => ({ ...row(db, l.from_id), key: readingKey(db, l.from_id) })).sort((a, b) => byKey(a.key, b.key))
+    .map((s) => ({ id: s.id, title: s.title, body: readEntity(path.join(dir, s.path)).body ?? '' }))
+}
+
+app.get('/projects/:p/entities/:id/lines', (c) => {
+  const { dir, db } = project(c.req.param('p'))
+  const id = c.req.param('id')
+  return c.json(linkedBodies(dir, db, id)
+    .map((s) => ({ id: s.id, title: s.title, lines: speakerLines(s.body).filter((l) => l.id === id).map((l) => l.text) }))
+    .filter((s) => s.lines.length))
+})
+
+// Passages describing this entry's properties ({^grey eyes^}{#[[Ana|id]]:eyes}); index: nth description in that text.
+app.get('/projects/:p/entities/:id/descriptions', (c) => {
+  const { dir, db } = project(c.req.param('p'))
+  const id = c.req.param('id')
+  return c.json(linkedBodies(dir, db, id).flatMap((s) =>
+    descriptions(s.body).filter((d) => d.id === id).map((d) => ({ from: s.id, fromTitle: s.title, prop: d.prop, text: d.text, index: d.index }))))
 })
 
 app.get('/projects/:p/links', (c) => {
@@ -517,11 +554,12 @@ const EXPORTS: Record<string, [type: string, ext: string, write: (b: Book) => Bu
 function compile(dir: string, db: DatabaseSync, id: string, keepComments = false) {
   const book = row(db, id)
   const entity = readEntity(path.join(dir, book.path))
-  // Each scene as written (links resolved), with its POV link, for per-scene views like dialogue by POV.
+  // Each scene as written (links resolved), with its POV link and tagged dialogue, for per-scene views like dialogue by speaker.
   const list = children(db, book.id).flatMap((ch) => children(db, ch.id).map((s) => {
     const e = readEntity(path.join(dir, s.path))
-    return { id: s.id, chapterId: ch.id, chapter: ch.title, title: s.title, pov: fieldText(e.pov),
-      body: resolveLinks(db, keepComments ? e.body : stripComments(e.body)).trim() }
+    const body = stripTags(e.body)
+    return { id: s.id, chapterId: ch.id, chapter: ch.title, title: s.title, pov: fieldText(e.pov), lines: speakerLines(e.body),
+      body: resolveLinks(db, keepComments ? body : stripComments(body)).trim() }
   }))
   const chapters = children(db, book.id).map((ch) => ({ title: ch.title, scenes: list.filter((s) => s.chapterId === ch.id).map((s) => s.body) }))
   const [dedication, acknowledgements] = [fieldText(entity.dedication).trim(), fieldText(entity.acknowledgements).trim()]
@@ -605,6 +643,20 @@ app.get('/projects/:p/books/:id/compile', (c) => {
   const out = write({ title: book.title, chapters, author: fieldText(entity.author), words, dedication, acknowledgements, language: lang, cover })
   const suffix = format === 'submission' || format === 'review' ? `-${format}` : ''
   return c.body(new Uint8Array(out), 200, { 'content-type': type, 'content-disposition': `attachment; filename="${name}${suffix}.${ext}"` })
+})
+
+// Prose stats / Highlight word lists: { check, notAdverbs }, stored in project.json as `words`.
+app.put('/projects/:p/words', async (c) => {
+  const { dir } = project(c.req.param('p'))
+  const { check, notAdverbs } = await c.req.json()
+  const list = (v: unknown) => Array.isArray(v) && v.every((w) => typeof w === 'string')
+  if (!list(check) || !list(notAdverbs)) throw new HTTPException(400, { message: 'Expected two lists of words' })
+  const clean = (ws: string[]) => [...new Set(ws.map((w) => w.trim().replace(/\s+/g, ' ')).filter(Boolean))]
+  const file = path.join(dir, 'project.json')
+  const p = JSON.parse(fs.readFileSync(file, 'utf8'))
+  p.words = { check: clean(check), notAdverbs: clean(notAdverbs) }
+  await atomicWrite(file, JSON.stringify(p, null, 2))
+  return c.json(p.words)
 })
 
 // Timeline calendar: month names and an era label, stored in project.json.

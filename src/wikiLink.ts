@@ -60,7 +60,7 @@ export const WikiLink = Node.create<{ targets: () => LinkTarget[] }>({
   },
 })
 
-function currentTitle(o: { targets: () => LinkTarget[] }, a: Record<string, string>) {
+export function currentTitle(o: { targets: () => LinkTarget[] }, a: Record<string, string>) {
   const t = o.targets().find((t) => t.id === a.id)
   return t ? linkText(a.title, t.title, t.aliases) : a.title
 }

@@ -1,4 +1,4 @@
-// Prose statistics for a whole book: sentence length, dialogue share, and the words and phrases you lean on.
+// Prose statistics for a whole book: the words and phrases you lean on, plus the dialogue helpers.
 // English-centric (stop words, -ly adverbs); the counts themselves work for any language.
 
 const STOP = new Set(`a about after again all also am an and any are as at back be been before being but by can could did do
@@ -7,36 +7,44 @@ most my no not now of off on one only or other our out over said say says she so
 there these they this those through to too up upon very was we were what when where which while who why will with would
 you your yours don't didn't i'm it's he's she's can't won't wasn't couldn't`.split(/\s+/))
 
-// Words writers are often told to cut. Counted wherever they appear.
-export const CRUTCHES = ['just', 'really', 'very', 'suddenly', 'actually', 'quite', 'somehow', 'seemed', 'felt', 'started to', 'began to', 'that']
+// Words writers are often told to cut: the default "words to check", which each project can edit (project.json `words`).
+export const CRUTCHES = ['just', 'really', 'very', 'suddenly', 'actually', 'quite', 'somehow', 'seemed', 'felt', 'started to', 'began to']
+export type WordLists = { check: string[]; notAdverbs: string[] } // notAdverbs: extra -ly words never to flag (names, invented words)
+export const DEFAULT_WORDS: WordLists = { check: CRUTCHES, notAdverbs: [] }
 
-// -ly words that aren't adverbs.
-const NOT_ADVERBS = new Set(['only', 'family', 'early', 'reply', 'holy', 'ugly', 'belly', 'jelly', 'lily', 'silly', 'friendly', 'lonely', 'likely', 'daily', 'supply', 'apply', 'rely', 'italy', 'emily', 'sally', 'bully', 'fly', 'july'])
+// -ly words that aren't adverbs: adjectives (lovely, elderly, costly), nouns (family, belly) and verbs (reply, supply).
+// improvement: a fixed list, not a dictionary; rarer -ly adjectives still get flagged until added to the project's notAdverbs.
+const NOT_ADVERBS = new Set(`only family early reply holy ugly belly jelly lily silly friendly unfriendly lonely likely unlikely daily
+supply apply rely comply imply multiply italy emily sally molly holly polly kelly billy bully fly july ally rally tally dally sully
+lovely unlovely elderly costly deadly lively lowly homely comely kindly unkindly orderly disorderly timely untimely ghastly beastly
+ghostly ungodly godly saintly princely kingly queenly courtly stately manly womanly motherly fatherly brotherly sisterly
+neighbourly neighborly scholarly worldly unworldly otherworldly heavenly earthly unearthly cowardly miserly niggardly leisurely
+weekly monthly yearly hourly nightly quarterly fortnightly burly surly curly wily oily sly jolly chilly hilly frilly smelly
+woolly wooly prickly bristly wobbly bubbly crinkly wrinkly sparkly cuddly wiggly squiggly giggly gangly sickly measly grisly
+grizzly gnarly pebbly crumbly knobbly lordly shapely unsightly sightly seemly unseemly dastardly portly melancholy anomaly
+assembly butterfly dragonfly firefly gadfly folly gully dolly trolly jowly matronly maidenly spindly`.split(/\s+/))
 
 export type Count = [text: string, n: number]
 export type ProseStats = {
-  words: number; sentences: number; avgSentence: number; longestSentence: number; dialogue: number // % of words inside quotes
-  syllables: number; flesch: number // Flesch reading ease (English)
+  words: number
   topWords: Count[]; phrases: Count[]; adverbs: Count[]; crutches: Count[]
 }
 
 const WORD = /[\p{L}\p{N}][\p{L}\p{N}'’-]*/gu
 export const wordsOf = (s: string) => (s.match(WORD) ?? []).map((w) => w.toLowerCase().replace(/’/g, "'"))
-export const isAdverb = (w: string) => w.length > 4 && w.endsWith('ly') && !NOT_ADVERBS.has(w)
+export const isAdverb = (w: string, notAdverbs: string[] = []) =>
+  w.length > 4 && w.endsWith('ly') && !NOT_ADVERBS.has(w) && !notAdverbs.some((n) => n.toLowerCase() === w)
+// The words-to-check list as one whole-word, any-case pattern; a phrase matches across any spacing ("began  to").
+const checkPattern = (check: string[]) => {
+  const alts = check.map((c) => c.trim()).filter(Boolean).sort((a, b) => b.length - a.length)
+    .map((c) => c.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+'))
+  return alts.length ? new RegExp(`(?<![\\p{L}\\p{N}])(?:${alts.join('|')})(?![\\p{L}\\p{N}'’-])`, 'giu') : null
+}
 // Words inside quotation marks (straight quotes within a line, or curly quotes).
 export const dialogueWords = (text: string) => (text.match(/“[^”]*”|"[^"\n]*"/g) ?? []).reduce((n, q) => n + wordsOf(q).length, 0)
 // Markdown → prose for counting: headings and scene breaks dropped, emphasis marks and escapes removed.
 export const proseText = (md: string) => md.split('\n').filter((l) => !/^#|^\s*(\*\s*){3}$/.test(l)).join('\n')
   .replace(/[*_`>~]+/g, ' ').replace(/\\(.)/g, '$1')
-
-// improvement: English syllables by vowel groups (a silent final "e" dropped, "-le" kept); off by one on words like "created".
-export function syllablesOf(word: string) {
-  const w = word.toLowerCase().replace(/[^a-z]/g, '')
-  const core = /[^aeiouy]le$/.test(w) ? w : w.replace(/e$/, '')
-  return Math.max(1, core.match(/[aeiouy]+/g)?.length ?? 0)
-}
-export const flesch = (words: number, sentences: number, syllables: number) =>
-  words && sentences ? 206.835 - 1.015 * (words / sentences) - 84.6 * (syllables / words) : 0
 
 // Where the book's running word count crosses a quarter, half and three quarters: the scene it happens in.
 export type Beat = '¼' | 'Midpoint' | '¾'
@@ -54,54 +62,47 @@ export function beats(scenes: { id: string; words: number }[]) {
   return out
 }
 
-// Words to look at again while writing: crutch words and -ly adverbs, as ranges in `text`.
-const CRUTCH_WORDS = new Set(CRUTCHES.filter((c) => !c.includes(' ')))
-export function overusedRanges(text: string) {
+// Words to look at again while writing: the words-to-check list and -ly adverbs, as ranges in `text`.
+export function overusedRanges(text: string, words: WordLists = DEFAULT_WORDS) {
   const out: { from: number; to: number; why: string }[] = []
-  for (const m of text.matchAll(WORD)) {
-    const w = m[0].toLowerCase().replace(/’/g, "'")
-    const why = CRUTCH_WORDS.has(w) ? 'often cut in revision' : isAdverb(w) ? '-ly adverb' : ''
-    if (why) out.push({ from: m.index, to: m.index + m[0].length, why })
-  }
-  for (const m of text.matchAll(/(?<![\p{L}\p{N}])(?:started|began) to(?![\p{L}\p{N}])/giu))
-    out.push({ from: m.index, to: m.index + m[0].length, why: 'often cut in revision' })
+  const re = checkPattern(words.check)
+  if (re) for (const m of text.matchAll(re)) out.push({ from: m.index, to: m.index + m[0].length, why: 'on your words-to-check list' })
+  const checked = (at: number) => out.some((r) => r.from <= at && at < r.to)
+  for (const m of text.matchAll(WORD))
+    if (!checked(m.index) && isAdverb(m[0].toLowerCase(), words.notAdverbs)) out.push({ from: m.index, to: m.index + m[0].length, why: '-ly adverb' })
   return out.sort((a, b) => a.from - b.from)
 }
+
+// Quotes in `text` (as dialogueWords finds them), as ranges.
+export const quoteRanges = (text: string) => [...text.matchAll(/“[^”]*”|"[^"\n]*"/g)].map((m) => ({ from: m.index, to: m.index + m[0].length }))
 const top = (m: Map<string, number>, n: number, min = 2): Count[] =>
   [...m].filter(([, c]) => c >= min).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, n)
 const bump = (m: Map<string, number>, k: string) => m.set(k, (m.get(k) ?? 0) + 1)
 
 // md: the compiled book (headings are titles, `* * *` scene breaks), as /compile?format=md returns it.
-export function proseStats(md: string): ProseStats {
+export function proseStats(md: string, words: WordLists = DEFAULT_WORDS): ProseStats {
   const text = proseText(md)
   const all = wordsOf(text)
   const sentences = text.split(/[.!?…]+["”’)]*(?=\s|$)|\n\s*\n/).map(wordsOf).filter((s) => s.length)
-  const quoted = dialogueWords(text)
-  const syllables = all.reduce((n, w) => n + syllablesOf(w), 0)
 
   const freq = new Map<string, number>()
   const adverbs = new Map<string, number>()
   for (const w of all) {
     if (!STOP.has(w) && w.length > 2 && !/^\d+$/.test(w)) bump(freq, w)
-    if (isAdverb(w)) bump(adverbs, w)
+    if (isAdverb(w, words.notAdverbs)) bump(adverbs, w)
   }
   // Three-word phrases within a sentence, skipping ones made only of stop words ("and then the").
   const phrases = new Map<string, number>()
   for (const s of sentences)
     for (let i = 0; i + 3 <= s.length; i++)
       if (!s.slice(i, i + 3).every((w) => STOP.has(w))) bump(phrases, s.slice(i, i + 3).join(' '))
-  const joined = ` ${all.join(' ')} `
-  const crutches: Count[] = CRUTCHES.map((c) => [c, joined.match(new RegExp(`(?<= )${c}(?= )`, 'g'))?.length ?? 0] as Count).filter(([, n]) => n > 0)
-    .sort((a, b) => b[1] - a[1])
+  const checks = new Map<string, number>()
+  const re = checkPattern(words.check)
+  if (re) for (const m of text.matchAll(re)) bump(checks, m[0].toLowerCase().replace(/\s+/g, ' '))
+  const crutches = top(checks, 100, 1)
 
   return {
     words: all.length,
-    sentences: sentences.length,
-    avgSentence: sentences.length ? all.length / sentences.length : 0,
-    longestSentence: Math.max(0, ...sentences.map((s) => s.length)),
-    dialogue: all.length ? Math.round((quoted / all.length) * 100) : 0,
-    syllables,
-    flesch: flesch(all.length, sentences.length, syllables),
     topWords: top(freq, 30),
     phrases: top(phrases, 15, 3),
     adverbs: top(adverbs, 20),

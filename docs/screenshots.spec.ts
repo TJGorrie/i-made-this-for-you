@@ -7,7 +7,7 @@ import { PROJECTS_DIR } from '../playwright.config.ts'
 import { fakeCursor, record } from './gif.ts'
 
 test.use({ viewport: { width: 1280, height: 800 }, deviceScaleFactor: 2 })
-test.setTimeout(180_000)
+test.setTimeout(300_000)
 test.describe.configure({ mode: 'serial' }) // the GIFs reuse the demo the first test builds
 
 const SLUG = 'the-salt-road'
@@ -65,6 +65,7 @@ test('screenshots', async ({ page }) => {
   const upload = async (name: string, data: Buffer) =>
     (await (await page.request.post(`/api${P}/assets?name=${name}`, { data })).json()).name
   const link = (e: { id: string; title: string }, text = e.title) => `[[${text}|${e.id}]]`
+  const says = (e: { id: string; title: string }, line: string) => `{%${line}%}{@${link(e)}}` // dialogue tagged with its speaker
 
   // ---- The world ----
   const portrait = await upload('mara.png', await draw(page, 'portrait'))
@@ -115,7 +116,7 @@ test('screenshots', async ({ page }) => {
   const ch2 = await add({ type: 'chapter', title: 'The Glass Marsh', parent: book.id, target: '600' })
   const ch3 = await add({ type: 'chapter', title: 'Saltspire', parent: book.id, target: '600' })
   const tithe = await add({
-    type: 'scene', title: 'The Tithe Ship', parent: ch1.id, status: 'revised', pov: link(mara), appears: [link(mara), link(tomas), link(rook)],
+    type: 'scene', title: 'The Tithe Ship', parent: ch1.id, status: 'revised', pov: link(mara), synopsis: 'Rook arrives to collect. Mara counts the guards.', threads: 'tithe, family', appears: [link(mara), link(tomas), link(rook)],
     mentioned: [link(harrow), link(guild)], review: [{ note: 'Check the tide times match chapter two', done: false }],
     body: `The tithe ship came in on the morning tide, black-sailed and riding low, and by the time it tied up at the long quay half of ${link(harrow)} had found a reason to be somewhere else.
 
@@ -123,29 +124,31 @@ ${link(mara, 'Mara')} stayed. She sat on the sea wall with her boots hanging ove
 
 “That’s {==him==}{>>Hint at Rook earlier? Readers need to know the name before this.<<},” said ${link(tomas, 'Tomas')}, too loudly. “That’s ${link(rook)}.”
 
-“I know who it is.” She did not look away. Rook walked the quay the way other men walked their own gardens, and wherever he stopped, people found their purses.
+${says(mara, '“I know who it is.”')} She did not look away. Rook walked the quay the way other men walked their own gardens, and wherever he stopped, people found their purses.
 
 Up on the hill the bells began to ring the tithe hour, slow and flat, {==like a door being knocked on by someone who already has the key==}{>>Love this. Keep.<<}.`,
   })
   await add({
     type: 'scene', title: 'What the Marsh Keeps', parent: ch1.id, status: 'draft', pov: link(mara), appears: [link(mara), link(ines)],
+    synopsis: 'Ines tells Mara the marsh holds the Vell share.', threads: 'family, marsh',
     body: `${link(ines)} had not left her chair by the stove in three winters, but she knew about the ship before Mara had her coat off.
 
-“He’ll want the Vell share,” she said. “In salt, or in something worse.”
+${says(ines, '“He’ll want the Vell share,”')} she said. ${says(ines, '“In salt, or in something worse.”')}
 
 “We don’t have it.”
 
-“No.” Ines turned a cup in her hands. “But ${link(marsh, 'the Marsh')} does. Your mother knew the way through. I expect you remember more of it than you think.”
+${says(ines, '“No.”')} Ines turned a cup in her hands. “But ${link(marsh, 'the Marsh')} does. Your mother knew the way through. I expect you remember more of it than you think.”
 
 Mara remembered mist, and the sound of reeds closing behind a boat like a curtain. {==She remembered being told never to go back.==}{>>Too on the nose? Show it instead.<<}`,
   })
   await add({
     type: 'scene', title: 'Reeds', parent: ch2.id, status: 'draft', pov: link(mara), appears: [link(mara), link(tomas)],
+    synopsis: 'Into the marsh at dusk, following the pale stones.', threads: 'marsh',
     body: `They went at dusk, when the tide was turning and the marsh breathed out its cold. Tomas rowed. Mara watched the water for the pale stones their mother used to follow, and found the first one where she had always known it would be.
 
 Under the water, the old road ran on without them, straight as a ruled line.`,
   })
-  await add({ type: 'scene', title: 'The White Tower', parent: ch3.id, status: 'outline', pov: link(rook), body: `${link(rook)} reads the Vell ledger and finds a name he did not expect.` })
+  await add({ type: 'scene', title: 'The White Tower', parent: ch3.id, status: 'outline', pov: link(rook), synopsis: 'Rook finds a name in the ledger.', threads: 'tithe', body: `${link(rook)} reads the Vell ledger and finds a name he did not expect.` })
 
   // A few saved versions of the first scene, for the History panel.
   const sceneUrl = `${E}/${tithe.id}`
@@ -280,7 +283,7 @@ test.describe('gifs', () => {
       throw new Error(`"${text}" not on screen`)
     }, text)
     const pause = (ms: number) => page.waitForTimeout(ms)
-    const saved = () => expect(page.locator('.statusbar')).toContainText('Saved')
+    const saved = () => expect(page.locator('.pane').first().locator('.statusbar')).toContainText('Saved') // the main pane's
 
     // 1. Write, and @-link a character by one of their other names; hover to see who it is.
     await openEntry('Reeds')
@@ -354,5 +357,135 @@ test.describe('gifs', () => {
     await expect(page.getByLabel('Title')).toHaveValue('The Tithe Ship')
     await pause(2200)
     console.log('review.gif', await stop('docs/img/review.gif'))
+
+    // Drag-select some text in the editor, the way a hand would.
+    const selectText = async (text: string) => {
+      const r = await textRect(text)
+      await glide(r.left + 1, r.y); await page.mouse.down()
+      for (let i = 1; i <= 12; i++) { await page.mouse.move(r.left + ((r.right - 1 - r.left) * i) / 12, r.y); await pause(30) }
+      at = { x: r.right - 1, y: r.y }
+      await page.mouse.up()
+      await pause(400)
+    }
+    const menu = page.locator('.bubble-menu')
+
+    // Scroll the page with the wheel until something is comfortably on screen (x: which pane to scroll).
+    const scrollTo = async (l: ReturnType<Page['locator']>, x = 800) => {
+      await glide(x, 500)
+      const top = () => l.evaluate((el) => el.getBoundingClientRect().top)
+      for (let was = Infinity, now = await top(); now > 540 && now < was; was = now, now = await top()) { // until it's up or can't go further
+        await page.mouse.wheel(0, 60); await pause(120)
+      }
+      await l.scrollIntoViewIfNeeded() // in case the wheel stalled (e.g. smooth scrolling hadn't started yet)
+      await pause(800)
+    }
+
+    // 5. Describe: mark a phrase as describing a character, with his entry open beside the scene;
+    // it appears there, linked back to the passage.
+    await aside.getByRole('button', { name: 'Captain Rook', exact: true }).click({ modifiers: ['Shift'] })
+    const side = page.getByLabel('Side pane', { exact: true })
+    await expect(side.getByLabel('Title')).toHaveValue('Captain Rook')
+    stop = record(page, CLIP)
+    await pause(1000)
+    await selectText('in a grey coat')
+    await clickOn(menu.getByRole('button', { name: 'Describe' }))
+    await glideTo(page.getByLabel('Entry', { exact: true }))
+    await page.getByLabel('Entry', { exact: true }).selectOption({ label: 'Captain Rook (character)' })
+    await pause(800)
+    await clickOn(page.getByLabel('Property'))
+    await page.keyboard.type('appearance', { delay: 80 })
+    await pause(600)
+    await clickOn(page.locator('form.describe').getByRole('button', { name: 'Add' }))
+    await expect(page.locator('.ProseMirror .described', { hasText: 'in a grey coat' })).toBeVisible()
+    await saved()
+    const described = side.getByRole('region', { name: 'Described in the text' })
+    await expect(described).toContainText('in a grey coat')
+    await pause(600)
+    await scrollTo(described, 1100)
+    const passage = described.getByRole('button', { name: /in a grey coat/ })
+    await glideTo(passage)
+    await pause(1500)
+    const away = await textRect('somewhere else.')
+    await glide(away.right - 4, away.y); await page.mouse.down(); await page.mouse.up() // click away: the selection goes
+    await pause(800)
+    await clickOn(passage)
+    await expect.poll(() => page.evaluate(() => getSelection()!.toString())).toBe('in a grey coat')
+    await pause(2500)
+    console.log('describe.gif', await stop('docs/img/describe.gif'))
+    await side.getByRole('button', { name: 'Close side pane' }).click()
+
+    // 6. Speaker: tag a line of dialogue, then read everything that character says.
+    await openEntry('What the Marsh Keeps')
+    await page.getByLabel('Highlight in text').selectOption('dialogue') // untagged lines tinted, so the tag visibly lands
+    const untagged = page.locator('.ProseMirror .untagged', { hasText: 'We don’t have it' })
+    await untagged.scrollIntoViewIfNeeded()
+    stop = record(page, CLIP)
+    await pause(1500)
+    await glideTo(untagged)
+    await pause(800)
+    await selectText('“We don’t have it.”')
+    await pause(600)
+    await clickOn(menu.getByRole('button', { name: 'Speaker' }))
+    // Native dropdowns don't show in screenshots: open it as a list on the page and click the name.
+    const who = page.getByLabel('Who says it')
+    await who.evaluate((el: HTMLSelectElement) => (el.size = el.options.length))
+    await pause(1000)
+    await clickOn(who.getByRole('option', { name: 'Mara Vell' }))
+    await expect(page.locator('.ProseMirror .speaker', { hasText: 'We don’t have it' })).toBeVisible()
+    await glide(at.x + 120, at.y + 60)
+    await pause(2000)
+    await saved()
+    await openEntry('Mara Vell')
+    await pause(1200)
+    const lines = page.locator('.spoken-lines')
+    await expect(lines).toContainText('2 in 2 scenes')
+    await scrollTo(lines)
+    await clickOn(lines.locator('summary'))
+    await expect(lines.locator('li')).toHaveCount(2)
+    await pause(1000)
+    await glideTo(lines.locator('li', { hasText: 'We don’t have it' }))
+    await pause(3000)
+    console.log('speaker.gif', await stop('docs/img/speaker.gif'))
+
+    // 7. Highlight words to check, then dialogue nobody has been tagged as saying.
+    await openEntry('The Tithe Ship')
+    const highlight = page.getByLabel('Highlight in text')
+    await highlight.selectOption('') // still on from the speaker GIF
+    stop = record(page, CLIP)
+    await pause(800)
+    await glideTo(highlight)
+    await highlight.selectOption('words')
+    await pause(2200)
+    await highlight.selectOption('dialogue')
+    await pause(2200)
+    await highlight.selectOption('')
+    await pause(600)
+    console.log('highlight.gif', await stop('docs/img/highlight.gif'))
+
+    // 8. Prose stats: who talks most, and the words you lean on; click one to find it.
+    await aside.getByRole('button', { name: 'Prose stats', exact: true }).click()
+    await expect(page.getByRole('region', { name: 'Dialogue by speaker' }).locator('tr')).toHaveCount(2)
+    stop = record(page, CLIP)
+    await pause(1600)
+    await clickOn(page.locator('.prose-list', { hasText: 'Most used words' }).getByRole('button').first())
+    await expect(page.locator('.hit').first()).toBeVisible()
+    await pause(2200)
+    console.log('prose.gif', await stop('docs/img/prose.gif'))
+    await page.getByPlaceholder('Search everything…').fill('')
+
+    // 9. The corkboard, picking out one plot thread.
+    await aside.getByRole('button', { name: 'Corkboard', exact: true }).click()
+    await expect(page.locator('.card')).toHaveCount(4)
+    const pick = page.getByLabel('Highlight', { exact: true })
+    stop = record(page, CLIP)
+    await pause(1200)
+    await glideTo(pick)
+    await pick.selectOption('thread:marsh')
+    await pause(1800)
+    await pick.selectOption('thread:tithe')
+    await pause(1800)
+    await pick.selectOption('')
+    await pause(800)
+    console.log('corkboard.gif', await stop('docs/img/corkboard.gif'))
   })
 })

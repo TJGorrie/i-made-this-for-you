@@ -7,12 +7,12 @@ import { createProject, newEntityPath, newId, parseEntity, projectFiles, readEnt
 import { backlinks, countWords, findPattern, indexFile, linkTargets, openIndex, proseMatches, resolveLinks, search, spliceMatches } from './indexer.ts'
 import { enforceCap, historyBytes, listSnapshots, prune, readSnapshot, snapshot } from './history.ts'
 import { projection, recordDay, streak, type Goals } from './goals.ts'
-import { calendarLabel, compareDates, linkText } from '../src/api.ts'
+import { calendarLabel, compareDates, linkText, readable, descriptions, speakerLines, stripTags } from '../src/api.ts'
 import { reviewItems, setInline } from './review.ts'
 import { stripComments } from './indexer.ts'
 import { docx, docxToMarkdown, epub, importMarkdown, unzip as unzipFiles, zip } from './export.ts'
 import { diffWords } from '../src/diff.ts'
-import { beats, dialogueWords, flesch, overusedRanges, proseStats, proseText, syllablesOf } from '../src/prose.ts'
+import { beats, dialogueWords, overusedRanges, proseStats, proseText } from '../src/prose.ts'
 import { ageAt, birthYears, continuity } from '../src/continuity.ts'
 import { inflateRawSync, crc32 } from 'node:zlib'
 
@@ -34,6 +34,17 @@ try {
   assert.equal(countWords('One {==two three==}{>>this note is not counted<<} four.'), 4) // comment notes aren't prose
   assert.equal(countWords('One {==two==}{>>[x] done note<<} three.'), 3)
   assert.equal(stripComments('A {==b==}{>>[x] note<<} c.'), 'A b c.')
+  // Tagged dialogue: the speaker's name isn't prose; the line is.
+  const said = 'She turned. {%"Not 50% sure," she said%}{@[[Ana|a1]]} and {%"Go."%}{@[[Bea|b2]]}'
+  assert.equal(countWords(said), 9)
+  assert.equal(stripTags(said), 'She turned. "Not 50% sure," she said and "Go."')
+  assert.deepEqual(speakerLines(said), [{ text: '"Not 50% sure," she said', title: 'Ana', id: 'a1' }, { text: '"Go."', title: 'Bea', id: 'b2' }])
+  assert.equal(readable(said), stripTags(said))
+  // Descriptions: the text is prose, the entry and property aren't; nested in dialogue too.
+  const desc = 'Her {^grey eyes^}{#[[Ana|a1]]:eyes} met {%"{^Hi^}{#[[Bea|b2]]:voice}"%}{@[[Bea|b2]]}'
+  assert.equal(stripTags(desc), 'Her grey eyes met "Hi"')
+  assert.equal(countWords(desc), 5)
+  assert.deepEqual(descriptions(desc).map((d) => [d.text, d.id, d.prop, d.index]), [['grey eyes', 'a1', 'eyes', 0], ['Hi', 'b2', 'voice', 1]])
 
   // Review: inline comments (done = [x] prefix) and frontmatter notes, ticked off by index.
   const body = 'A {==b==}{>>first<<} c {==d **e**==}{>>[x] second<<}.'
@@ -115,18 +126,12 @@ try {
   // Prose stats.
   const ps = proseStats('# Book\n\n## One\n\nShe ran quickly. "Run," he said, "run really fast."\n\n* * *\n\nShe ran quickly home. She ran quickly again.')
   assert.equal(ps.words, 17)
-  assert.equal(ps.sentences, 4)
-  assert.equal(ps.dialogue, 24) // 4 of 17 words inside quotes
   assert.deepEqual(ps.adverbs, [['quickly', 3]])
   assert.deepEqual(ps.phrases, [['she ran quickly', 3]])
   assert.deepEqual(ps.topWords.slice(0, 3), [['quickly', 3], ['ran', 3], ['run', 2]])
   assert.deepEqual(ps.crutches, [['really', 1]])
 
-  // Readability: syllables by vowel groups, Flesch reading ease.
-  assert.deepEqual(['cat', 'table', 'beautiful', 'the', 'rhythm', 'Gate'].map(syllablesOf), [1, 2, 3, 1, 1, 1])
-  assert.equal(proseStats('The cat sat on the mat.').flesch.toFixed(3), '116.145') // 206.835 − 1.015×6 − 84.6×1
-  assert.equal(flesch(0, 0, 0), 0)
-  assert.equal(ps.dialogue, Math.round((dialogueWords(proseText('She ran quickly. "Run," he said, "run really fast."')) / 17) * 100))
+  assert.equal(dialogueWords(proseText('She ran quickly. "Run," he said, "run really fast."')), 4)
 
   // Beats: the scene where the running total crosses ¼, ½, ¾; empty scenes never get one.
   const bs = (ws: number[]) => beats(ws.map((words, i) => ({ id: `s${i}`, words }))).map((b) => `${b.sceneId}:${b.beat}`)
@@ -138,7 +143,18 @@ try {
   // Overused words while writing: crutch words (whole words only) and -ly adverbs, with positions.
   const ov = 'Suddenly she just ran quickly, unjustly? Her family began to stare. Justice.'
   assert.deepEqual(overusedRanges(ov).map((r) => `${ov.slice(r.from, r.to)}:${r.why}`),
-    ['Suddenly:often cut in revision', 'just:often cut in revision', 'quickly:-ly adverb', 'unjustly:-ly adverb', 'began to:often cut in revision'])
+    ['Suddenly:on your words-to-check list', 'just:on your words-to-check list', 'quickly:-ly adverb', 'unjustly:-ly adverb',
+      'began to:on your words-to-check list'])
+  // "that" is off the default list; -ly adjectives and nouns aren't adverbs.
+  const ok = 'She knew that the lovely, elderly, costly butterfly flew weekly.'
+  assert.deepEqual(overusedRanges(ok), [])
+  // A project's own lists: phrases match across spacing and case, never inside a longer word; notAdverbs are left alone.
+  const mine = { check: ['nodded', 'a beat'], notAdverbs: ['Kelvanly'] }
+  const ov2 = 'He nodded. A  beat. Abeat. Kelvanly smiled warmly.'
+  assert.deepEqual(overusedRanges(ov2, mine).map((r) => ov2.slice(r.from, r.to)), ['nodded', 'A  beat', 'warmly'])
+  assert.deepEqual(proseStats(ov2, mine).crutches, [['a beat', 1], ['nodded', 1]])
+  assert.deepEqual(proseStats(ov2, mine).adverbs, [])
+  assert.deepEqual(proseStats(`${ov2} ${ov2}`, mine).adverbs, [['warmly', 2]])
 
   // Continuity: a scene after a character's death (or before their birth) that still has them in it.
   const r = (id: string, type: string, extra = {}) => ({ id, type, title: id, words: 0, ...extra })

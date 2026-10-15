@@ -31,14 +31,18 @@ export const Comment = Mark.create({
 
 // The doc's comments in order, as ranges (the nth one is the nth {==…==} in the saved Markdown).
 export type CommentRange = { from: number; to: number; text: string; note: string; done: boolean }
-export function commentRanges(doc: Node): CommentRange[] {
-  const out: CommentRange[] = []
+export const commentRanges = (doc: Node): CommentRange[] =>
+  markRanges(doc, 'comment').map((r) => ({ ...r, note: r.attrs.note, done: r.attrs.done }))
+
+// Stretches of text carrying a mark (comment, described…), in order; the nth is the nth in the saved Markdown.
+export function markRanges(doc: Node, name: string) {
+  const out: { from: number; to: number; text: string; attrs: Record<string, any> }[] = []
   doc.descendants((node, pos) => {
-    const m = node.marks.find((m) => m.type.name === 'comment')
+    const m = node.marks.find((m) => m.type.name === name)
     if (!m) return
     const last = out.at(-1)
-    if (last && last.to === pos && last.note === m.attrs.note && last.done === m.attrs.done) last.to = pos + node.nodeSize
-    else out.push({ from: pos, to: pos + node.nodeSize, text: '', note: m.attrs.note, done: m.attrs.done })
+    if (last && last.to === pos && JSON.stringify(last.attrs) === JSON.stringify(m.attrs)) last.to = pos + node.nodeSize
+    else out.push({ from: pos, to: pos + node.nodeSize, text: '', attrs: m.attrs })
   })
   for (const r of out) r.text = doc.textBetween(r.from, r.to, ' ')
   return out

@@ -30,8 +30,9 @@ test('comments: add on selected text, edit, not counted or compiled', async ({ p
   expect(readFile(scenePath)).toContain('{==First==}{>>too abrupt?<<} line here.')
   await expect(page.locator('.tree-item', { hasText: 'Opening' })).toContainText('3') // the note isn't counted as words
 
-  // Cursor inside the comment → Comment edits it; empty removes it.
-  await page.locator('.ProseMirror .comment').click()
+  // Selection inside the comment → Comment edits it; empty removes it.
+  await page.keyboard.press('Control+Home')
+  for (let i = 0; i < 3; i++) await page.keyboard.press('Shift+ArrowRight') // "Fir"
   await page.getByRole('button', { name: 'Comment', exact: true }).click()
   await expect(page.getByLabel('Comment', { exact: true })).toHaveValue('too abrupt?')
   await page.getByLabel('Comment', { exact: true }).fill('')

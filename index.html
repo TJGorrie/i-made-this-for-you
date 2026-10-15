@@ -71,6 +71,10 @@
       .prose .ProseMirror hr { border: 0; text-align: center; } .prose .ProseMirror hr::after { content: '* * *'; color: var(--muted); }
       .wiki-link { color: var(--accent); border-bottom: 1px dotted; cursor: help; }
       .statusbar { display: flex; align-items: center; gap: 8px; color: var(--muted); }
+      .bubble-menu { z-index: 15; background: var(--panel); border: 1px solid var(--border-2); border-radius: 4px; padding: 4px;
+        box-shadow: 0 4px 12px var(--shadow); display: flex; gap: 4px; }
+      .bubble-row, .bubble-row span, .bubble-row .describe { display: flex; gap: 4px; align-items: center; }
+      .bubble-row .describe { flex-wrap: wrap; max-width: 20em; } .bubble-row .describe select, .bubble-row .describe input { flex: 1 1 8em; min-width: 0; }
       .statusbar small { flex: 1; text-align: right; margin-right: 4px; }
       .type-link { display: inline; text-transform: capitalize; color: var(--muted) !important; }
 
@@ -166,6 +170,17 @@
       .writing-log td { padding: 2px 16px 2px 0; }
 
       .comment { background: var(--mark); border-bottom: 2px dotted var(--warn-border); cursor: help; }
+      .speaker { border-bottom: 1px solid color-mix(in srgb, var(--accent) 45%, transparent); }
+      .app.focus .speaker { border-bottom: 0; }
+      .described { border-bottom: 1px dotted color-mix(in srgb, var(--accent) 60%, transparent); }
+      .app.focus .described { border-bottom: 0; }
+      .descriptions { display: grid; grid-template-columns: max-content 1fr; gap: 2px 12px; margin: 0 0 16px; }
+      .descriptions h4 { grid-column: 1 / -1; margin: 0 0 4px; }
+      .descriptions .field-row { display: contents; }
+      .descriptions .field-row > span { font-size: 13px; color: var(--muted); text-transform: capitalize; }
+      .descriptions .link { display: block; text-align: left; }
+      .spoken-lines { border-top: 1px solid var(--border); margin-top: 24px; padding-top: 8px; }
+      .spoken-lines summary h4 { display: inline; } .spoken-lines ul { margin: 2px 0 10px; padding-left: 1.2em; }
       .comment[data-done] { background: none; border-bottom: 0; cursor: auto; } /* ticked off: mark kept so it can be re-opened */
       .review { border: 1px solid var(--border); border-radius: 4px; padding: 6px 10px; margin: 0 0 16px; font-size: 14px; }
       .review-head { display: flex; align-items: center; gap: 8px; color: var(--muted); }
@@ -215,7 +230,7 @@
       .image-field img { display: block; max-height: 160px; max-width: 240px; border-radius: 4px; border: 1px solid var(--border); }
       .image-field figure .mini { position: absolute; top: 4px; right: 4px; background: var(--panel); }
       select.export { padding: 0 2px; width: 3.2em; }
-      .calendar-settings { margin-bottom: 12px; }
+      .calendar-settings { margin-bottom: 12px; } .word-settings { margin-top: 24px; }
       .calendar-settings label { display: block; margin: 6px 0; }
       .calendar-settings textarea { display: block; width: 18em; }
 
@@ -270,6 +285,9 @@
       .app.focus .backlinks, .app.focus .focus-hide, .app.focus .type-link, .app.focus .review:not(.drafting),
       .app.focus .review-margin { display: none; }
       .app.focus .prose-wrap { padding-right: 0; }
+      /* Bare text: no link/comment/speaker/description/overused styling, tooltips or hover cards. */
+      .app.focus .prose :is(.wiki-link, .comment, .speaker, .described, .overused, .untagged) {
+        all: unset; pointer-events: none; }
       .app.focus .pane { padding-top: 8vh; }
       .app.focus .editor { max-width: 38em; }
       .focus-bar { position: fixed; top: 10px; right: 12px; display: flex; gap: 6px; opacity: .5; }
@@ -297,8 +315,10 @@
       .cast td button { border: 0; background: none; color: var(--accent); cursor: pointer; width: 100%; height: 100%; padding: 0; font-size: 12px; }
       .cast td.last-seen { text-align: left; padding: 0 8px; white-space: nowrap; border: 0; }
 
-      /* Overused words, when Highlight is on: a wavy underline, readable in both themes. */
-      .app.highlight .prose .overused { text-decoration: underline wavy var(--warn-border); text-underline-offset: 3px; background: var(--warn-bg); }
+      /* Highlight: words to check get a wavy underline; quotes with no speaker tagged a tint. Readable in both themes. */
+      .app.highlight-words .prose .overused { text-decoration: underline wavy var(--warn-border); text-underline-offset: 3px; background: var(--warn-bg); }
+      .app.highlight-dialogue .prose .untagged { background: color-mix(in srgb, var(--accent) 16%, transparent); border-radius: 2px; }
+      .app.highlight-dialogue .prose .speaker { border-bottom-width: 2px; }
 
       /* Corkboard pacing chart: scenes as bars, chapters as groups, beats as dashed lines. */
       .pacing h3 { font-size: 15px; margin: 4px 0 0; }
