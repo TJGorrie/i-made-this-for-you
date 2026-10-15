@@ -1,6 +1,6 @@
 // Word (.docx) and EPUB export without pandoc. Both formats are zip files of XML: scenes are parsed with marked,
 // reduced to simple blocks of styled text, and written out as WordprocessingML or XHTML.
-// improvement: tables, images and footnotes come out as plain text; manuscripts rarely use them.
+// Tables come out as plain " | "-separated lines; the editor makes neither tables, images nor footnotes, so only imports have them.
 import { crc32, deflateRawSync, inflateRawSync } from 'node:zlib'
 import { randomUUID } from 'node:crypto'
 import { marked, type Token, type Tokens } from 'marked'
@@ -74,6 +74,8 @@ const sceneBlocks = (md: string) => blocks(marked.lexer(md))
 // ---- Zip ----
 
 // Minimal zip writer (deflate, UTF-8 names). Entries marked stored are kept uncompressed (EPUB needs that for `mimetype`).
+// Zip64 end records once an archive passes 65,535 files (a big project backup); the whole zip must stay under 4 GB.
+const MAX16 = 0xffff, MAX32 = 0xffffffff
 export function zip(files: { name: string; data: string | Buffer; store?: boolean }[]) {
   const parts: Buffer[] = []
   const central: Buffer[] = []
@@ -91,16 +93,24 @@ export function zip(files: { name: string; data: string | Buffer; store?: boolea
     const local = Buffer.alloc(30)
     local.writeUInt32LE(0x04034b50, 0); fields(local, 4)
     const dirEntry = Buffer.alloc(46)
-    dirEntry.writeUInt32LE(0x02014b50, 0); dirEntry.writeUInt16LE(20, 4); fields(dirEntry, 6); dirEntry.writeUInt32LE(offset, 42)
+    dirEntry.writeUInt32LE(0x02014b50, 0); dirEntry.writeUInt16LE(45, 4); fields(dirEntry, 6); dirEntry.writeUInt32LE(offset, 42)
     parts.push(local, name, body)
     central.push(dirEntry, name)
     offset += local.length + name.length + body.length
   }
   const dir = Buffer.concat(central)
+  if (offset + dir.length >= MAX32) throw new Error('Over 4 GB: too big to zip')
   const end = Buffer.alloc(22)
-  end.writeUInt32LE(0x06054b50, 0); end.writeUInt16LE(files.length, 8); end.writeUInt16LE(files.length, 10)
+  end.writeUInt32LE(0x06054b50, 0); end.writeUInt16LE(Math.min(files.length, MAX16), 8); end.writeUInt16LE(Math.min(files.length, MAX16), 10)
   end.writeUInt32LE(dir.length, 12); end.writeUInt32LE(offset, 16)
-  return Buffer.concat([...parts, dir, end])
+  if (files.length < MAX16) return Buffer.concat([...parts, dir, end])
+  // Zip64 end record (where the real counts live) and its locator, before the classic end record.
+  const z = Buffer.alloc(76)
+  z.writeUInt32LE(0x06064b50, 0); z.writeBigUInt64LE(44n, 4); z.writeUInt16LE(45, 12); z.writeUInt16LE(45, 14)
+  z.writeBigUInt64LE(BigInt(files.length), 24); z.writeBigUInt64LE(BigInt(files.length), 32)
+  z.writeBigUInt64LE(BigInt(dir.length), 40); z.writeBigUInt64LE(BigInt(offset), 48)
+  z.writeUInt32LE(0x07064b50, 56); z.writeBigUInt64LE(BigInt(offset + dir.length), 64); z.writeUInt32LE(1, 72)
+  return Buffer.concat([...parts, dir, z, end])
 }
 
 // Text for XML: escaped, and without control characters XML doesn't allow.
@@ -208,15 +218,20 @@ ${notes.length ? rel('rC', 'officeDocument/2006/relationships/comments', 'commen
 
 // `# Title` names the book, `## Heading` starts a chapter, a line like `* * *`, `***`, `---` or `#` breaks scenes.
 // Text before the first chapter heading becomes an untitled chapter; no chapter headings at all gives one chapter.
-// improvement: chapters marked only by plain "Chapter 7" lines (no heading style) stay one big chapter.
+// With no `##` headings at all, a line of its own like "Chapter 7", "CHAPTER SEVEN: The Fall" or "Part II" starts a chapter.
+const NUM = String.raw`\d+|[ivxlc]+|(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety)(?:[- ](?:one|two|three|four|five|six|seven|eight|nine))?`
+const PLAIN_CHAPTER = new RegExp(`^(?:chapter|part)\\s+(?:${NUM})(?:\\s*[:.\\-–—]\\s*.{0,60})?$`, 'i')
 export function importMarkdown(md: string, fallbackTitle: string): Book {
   let title = ''
   const chapters: { title: string; lines: string[] }[] = []
   const BREAK = /^\s*(?:(?:[*_-]\s*){3,}|#|~{3,})\s*$/ // hr, or the "#" scene break some writers use
+  const plain = !/^##\s/m.test(md)
   for (const line of md.replace(/\r\n?/g, '\n').split('\n')) {
     const h = /^(#{1,2})\s+(.+?)\s*#*$/.exec(line)
+    const bare = line.trim().replace(/^[*_]+|[*_]+$/g, '').trim() // **Chapter 7** from a Word import
     if (h?.[1] === '#' && !title && !chapters.length) title = h[2]
     else if (h?.[1] === '##') chapters.push({ title: h[2], lines: [] })
+    else if (plain && PLAIN_CHAPTER.test(bare)) chapters.push({ title: bare, lines: [] })
     else {
       if (!chapters.length) chapters.push({ title: '', lines: [] })
       chapters.at(-1)!.lines.push(BREAK.test(line) ? '\u0000' : line)
@@ -239,7 +254,12 @@ export function unzip(buf: Buffer) {
   let end = buf.length - 22
   while (end >= 0 && buf.readUInt32LE(end) !== 0x06054b50) end--
   if (end < 0) throw new Error('Not a zip file')
-  for (let at = buf.readUInt32LE(end + 16), n = buf.readUInt16LE(end + 10); n > 0; n--) {
+  let [at, n] = [buf.readUInt32LE(end + 16), buf.readUInt16LE(end + 10)]
+  if ((at === MAX32 || n === MAX16) && end >= 20 && buf.readUInt32LE(end - 20) === 0x07064b50) { // zip64
+    const z = Number(buf.readBigUInt64LE(end - 12))
+    ;[at, n] = [Number(buf.readBigUInt64LE(z + 48)), Number(buf.readBigUInt64LE(z + 32))]
+  }
+  for (; n > 0; n--) {
     const method = buf.readUInt16LE(at + 10)
     const size = buf.readUInt32LE(at + 20)
     const nameLen = buf.readUInt16LE(at + 28)
@@ -263,7 +283,8 @@ const wordText = (xml: string) => [...xml.matchAll(/<w:t(?:\s[^>]*)?>([^<]*)<\/w
 
 // Word document → Markdown: Title → #, Heading 1 → ## (chapters), other headings → ###, bold/italic kept.
 // Word comments come back as inline comments ({==text==}{>>note<<}) when they start and end in the same paragraph.
-// improvement: style ids are matched in English ("Heading1"); a document styled in another Word language may need its own names.
+// Styles are matched by their built-in name ("heading 1"), which Word keeps in English whatever its language; the id
+// ("Heading1", "Überschrift1") is only a fallback for a document without styles.xml.
 export function docxToMarkdown(buf: Buffer) {
   const files = unzip(buf)
   const xml = files.get('word/document.xml')?.toString('utf8')
@@ -271,9 +292,12 @@ export function docxToMarkdown(buf: Buffer) {
   const notes = new Map<string, string>()
   for (const [, id, body] of (files.get('word/comments.xml')?.toString('utf8') ?? '').matchAll(/<w:comment\b[^>]*?\sw:id="(\d+)"[^>]*>([\s\S]*?)<\/w:comment>/g))
     notes.set(id, body.split('</w:p>').map(wordText).filter(Boolean).join(' ').replace(/<</g, '‹‹'))
+  const names = new Map([...(files.get('word/styles.xml')?.toString('utf8') ?? '')
+    .matchAll(/<w:style\b[^>]*?w:styleId="([^"]+)"[^>]*>(?:(?!<\/w:style>)[\s\S])*?<w:name w:val="([^"]+)"/g)].map((m) => [m[1], m[2]]))
   const paras = xml.match(/<w:p[ >][\s\S]*?<\/w:p>|<w:p\/>/g) ?? []
   return paras.map((p) => {
-    const style = /<w:pStyle w:val="([^"]+)"/.exec(p)?.[1] ?? ''
+    const id = /<w:pStyle w:val="([^"]+)"/.exec(p)?.[1] ?? ''
+    const style = (names.get(id) ?? id).replace(/\s+/g, '').toLowerCase() // "heading 1" → heading1
     const ranges = (kind: string) => new Set([...p.matchAll(new RegExp(`<w:commentRange${kind}\\b[^>]*?w:id="(\\d+)"`, 'g'))].map((m) => m[1]))
     const [starts, ends] = [ranges('Start'), ranges('End')]
     // Word splits text into many runs; neighbours with the same bold/italic are merged before marking them.
@@ -293,10 +317,10 @@ export function docxToMarkdown(buf: Buffer) {
     }
     const text = runs.map(({ text, mark }) => text.trim() && mark && mark !== '\0'
       ? text.replace(/^(\s*)([\s\S]*?)(\s*)$/, `$1${mark}$2${[...mark].reverse().join('')}$3`) : text).join('').trim()
-    if (style === 'Title') return `# ${text}`
-    if (/^Heading1$|^heading 1$/i.test(style)) return `## ${text}`
-    if (/^Heading\d$/i.test(style) && text) return `### ${text}`
-    if (style === 'SceneBreak' || /^\s*(?:(?:\\?[*#~_-]\s*){3}|#)\s*$/.test(text)) return '* * *'
+    if (style === 'title') return `# ${text}`
+    if (style === 'heading1') return `## ${text}`
+    if (/^heading\d$/.test(style) && text) return `### ${text}`
+    if (style === 'scenebreak' || /^\s*(?:(?:\\?[*#~_-]\s*){3}|#)\s*$/.test(text)) return '* * *'
     return text
   }).join('\n\n')
 }

@@ -1,9 +1,9 @@
 // Inline comment on a stretch of text, saved as CriticMarkup: {==commented text==}{>>the note<<}.
 // A ticked-off comment keeps its mark with a [x] prefix on the note ({>>[x] the note<<}), so it can be re-opened.
-// improvement: an @-link inside a commented stretch falls outside the comment on save (text kept); fine for notes.
 import { Mark } from '@tiptap/core'
-import type { Node } from '@tiptap/pm/model'
+import type { Mark as PMMark, Node } from '@tiptap/pm/model'
 import { parseNote } from './api.ts'
+import { markInline } from './tags.ts'
 
 export const Comment = Mark.create({
   name: 'comment',
@@ -24,7 +24,7 @@ export const Comment = Mark.create({
       if (m) return { type: 'comment', raw: m[0], ...parseNote(m[2]), tokens: lexer.inlineTokens(m[1]) }
     },
   },
-  parseMarkdown: (token, h) => h.applyMark('comment', h.parseInline(token.tokens ?? []), { note: token.note, done: token.done }),
+  parseMarkdown: (token, h) => markInline(h.parseInline(token.tokens ?? []), 'comment', { note: token.note, done: token.done }),
   renderMarkdown: (node, h) =>
     `{==${h.renderChildren(node)}==}{>>${node.attrs?.done ? '[x] ' : ''}${String(node.attrs?.note ?? '').replace(/<</g, '‹‹')}<<}`,
 })
@@ -36,13 +36,13 @@ export const commentRanges = (doc: Node): CommentRange[] =>
 
 // Stretches of text carrying a mark (comment, described…), in order; the nth is the nth in the saved Markdown.
 export function markRanges(doc: Node, name: string) {
-  const out: { from: number; to: number; text: string; attrs: Record<string, any> }[] = []
+  const out: { from: number; to: number; text: string; attrs: Record<string, any>; mark: PMMark }[] = []
   doc.descendants((node, pos) => {
     const m = node.marks.find((m) => m.type.name === name)
     if (!m) return
     const last = out.at(-1)
-    if (last && last.to === pos && JSON.stringify(last.attrs) === JSON.stringify(m.attrs)) last.to = pos + node.nodeSize
-    else out.push({ from: pos, to: pos + node.nodeSize, text: '', attrs: m.attrs })
+    if (last && last.to === pos && last.mark.eq(m)) last.to = pos + node.nodeSize
+    else out.push({ from: pos, to: pos + node.nodeSize, text: '', attrs: m.attrs, mark: m })
   })
   for (const r of out) r.text = doc.textBetween(r.from, r.to, ' ')
   return out

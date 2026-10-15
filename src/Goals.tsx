@@ -46,9 +46,15 @@ export function Today({ slug, rows }: { slug: string; rows: Row[] }) {
 }
 
 // Timed writing sprint: counts down, shows words written since it started, and logs the result.
-// improvement: lives in this page only; reloading the tab ends a sprint unrecorded.
+// The running sprint is kept in localStorage, so reloading the tab carries on with it (finishing it if time ran out).
+type Running = { at: number; minutes: number; start: number }
 function SprintTimer({ slug, total }: { slug: string; total: number }) {
-  const [sprint, setSprint] = useState<{ at: number; minutes: number; start: number }>()
+  const key = `sprint:${slug}`
+  const [sprint, setRunning] = useState<Running | undefined>(() => { try { return JSON.parse(localStorage.getItem(key)!) ?? undefined } catch { return undefined } })
+  const setSprint = (s?: Running) => {
+    try { if (s) localStorage.setItem(key, JSON.stringify(s)); else localStorage.removeItem(key) } catch {}
+    setRunning(s)
+  }
   const [done, setDone] = useState('')
   const [, tick] = useState(0)
   const totalRef = useRef(total)
@@ -71,7 +77,7 @@ function SprintTimer({ slug, total }: { slug: string; total: number }) {
     setSprint({ at: Date.now(), minutes, start: totalRef.current })
   }
   function finish(s: NonNullable<typeof sprint>) {
-    const minutes = Math.max(1, Math.round((Date.now() - s.at) / 60_000))
+    const minutes = Math.max(1, Math.min(s.minutes, Math.round((Date.now() - s.at) / 60_000))) // tab reopened late: the sprint's length
     const words = totalRef.current - s.start
     setSprint(undefined)
     setDone(`Sprint done: ${words > 0 ? '+' : ''}${words.toLocaleString()} words in ${minutes} min`)

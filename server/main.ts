@@ -46,9 +46,11 @@ const server = serve({ fetch: app.fetch, port, hostname: '127.0.0.1' }, () => {
   }
 })
 // Started twice (double-clicked again): the app is already running, so just show it.
-// improvement: assumes whatever holds the port is this app; a setting for the port if that ever clashes.
-server.on('error', (err: NodeJS.ErrnoException) => {
+// Something else on the port: say so, and how to pick another (PORT).
+server.on('error', async (err: NodeJS.ErrnoException) => {
   if (err.code !== 'EADDRINUSE' || !packaged) throw err
-  openBrowser()
-  setTimeout(() => process.exit(0), 500)
+  const ours = await fetch(`${url}/api/settings`).then((r) => r.json()).then((s) => s?.projectsDir !== undefined).catch(() => false)
+  if (ours) openBrowser()
+  else console.error(`Port ${port} is in use by another program. Set the PORT environment variable to use a different one.`)
+  setTimeout(() => process.exit(ours ? 0 : 1), ours ? 500 : 30_000) // not ours: leave the message up long enough to read
 })

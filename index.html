@@ -67,7 +67,9 @@
       .fields span { font-size: 13px; color: var(--muted); padding-top: 5px; text-transform: capitalize; }
       .fields textarea { resize: vertical; field-sizing: content; min-height: 1.5em; }
       .fields .add-field { grid-column: 2; justify-self: start; }
-      .prose .ProseMirror { min-height: 40vh; outline: none; font: 18px/1.7 Georgia, serif; }
+      .prose .ProseMirror { min-height: 40vh; outline: none; font: 1.2em/1.7 Georgia, serif; /* 18px; grows with .pane on big screens */
+        border: 1px solid var(--border-2); border-radius: 10px; padding: 12px 20px; }
+      .prose .ProseMirror:focus { border-color: var(--accent); }
       .prose .ProseMirror hr { border: 0; text-align: center; } .prose .ProseMirror hr::after { content: '* * *'; color: var(--muted); }
       .wiki-link { color: var(--accent); border-bottom: 1px dotted; cursor: help; }
       .statusbar { display: flex; align-items: center; gap: 8px; color: var(--muted); }
@@ -119,6 +121,7 @@
       .link-list .chip { margin: 0; display: inline-flex; align-items: center; padding: 0 2px 0 8px; cursor: default; }
       .chip-open, .chip-x { border: 0; background: none; color: inherit; cursor: pointer; padding: 0 2px; }
       .chip-x { color: var(--muted); }
+      .chip input { border: 0; background: none; color: inherit; padding: 0; font: inherit; }
 
       .timeline ol { list-style: none; padding: 0; border-left: 2px solid var(--border); margin-left: 10em; }
       .timeline li { position: relative; padding: 6px 0 6px 16px; }
@@ -263,8 +266,18 @@
 
       /* Phones and narrow windows: the sidebar becomes a menu over the page; panes stack; no comment margin. */
       .menu-toggle { display: none; }
+      /* Wide screens: the sidebar can be hidden (« or Ctrl+\); a ☰ button in its place brings it back. */
+      @media (min-width: 761px) {
+        .app.side-hidden > aside { display: none; }
+        .app.side-hidden .menu-toggle { display: block; flex: none; align-self: flex-start; margin: 10px 0 0 10px; }
+        .menu-toggle .menu-name { display: none; }
+      }
+      .app.focus .menu-toggle { display: none; }
+      /* Big screens: grow the text (and with it the em-sized reading column) rather than leaving wide empty margins. */
+      @media (min-width: 1400px) { .pane { font-size: clamp(15px, 0.45vw + 9px, 19px); } }
       @media (max-width: 760px) {
         .app { flex-direction: column; height: auto; min-height: 100vh; }
+        .side-collapse { display: none; }
         .menu-toggle { display: block; margin: 8px 16px 0; padding: 4px 10px; font-size: 14px; align-self: flex-start; }
         .app > aside { display: none; }
         .app.menu-open > aside { display: block; position: fixed; inset: 0; z-index: 25; width: auto; background: var(--bg); border: 0; padding-top: 48px; }
@@ -277,7 +290,6 @@
         .editor:has(.margin-note) { max-width: 42em; }
         .prose .ProseMirror { font-size: 17px; }
         .timeline ol { margin-left: 0; } .timeline .when { position: static; display: block; width: auto; text-align: left; }
-        .app.focus .menu-toggle { display: none; }
       }
 
       /* Focus mode: just the text. */

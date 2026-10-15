@@ -14,15 +14,8 @@ export const DEFAULT_WORDS: WordLists = { check: CRUTCHES, notAdverbs: [] }
 
 // -ly words that aren't adverbs: adjectives (lovely, elderly, costly), nouns (family, belly) and verbs (reply, supply).
 // improvement: a fixed list, not a dictionary; rarer -ly adjectives still get flagged until added to the project's notAdverbs.
-const NOT_ADVERBS = new Set(`only family early reply holy ugly belly jelly lily silly friendly unfriendly lonely likely unlikely daily
-supply apply rely comply imply multiply italy emily sally molly holly polly kelly billy bully fly july ally rally tally dally sully
-lovely unlovely elderly costly deadly lively lowly homely comely kindly unkindly orderly disorderly timely untimely ghastly beastly
-ghostly ungodly godly saintly princely kingly queenly courtly stately manly womanly motherly fatherly brotherly sisterly
-neighbourly neighborly scholarly worldly unworldly otherworldly heavenly earthly unearthly cowardly miserly niggardly leisurely
-weekly monthly yearly hourly nightly quarterly fortnightly burly surly curly wily oily sly jolly chilly hilly frilly smelly
-woolly wooly prickly bristly wobbly bubbly crinkly wrinkly sparkly cuddly wiggly squiggly giggly gangly sickly measly grisly
-grizzly gnarly pebbly crumbly knobbly lordly shapely unsightly sightly seemly unseemly dastardly portly melancholy anomaly
-assembly butterfly dragonfly firefly gadfly folly gully dolly trolly jowly matronly maidenly spindly`.split(/\s+/))
+const NOT_ADVERBS = new Set(`only family early reply holy ugly belly jelly silly friendly lonely likely daily supply apply rely
+italy july fly ally lovely elderly costly deadly lively weekly monthly yearly butterfly assembly`.split(/\s+/))
 
 export type Count = [text: string, n: number]
 export type ProseStats = {
@@ -40,10 +33,8 @@ const checkPattern = (check: string[]) => {
     .map((c) => c.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+'))
   return alts.length ? new RegExp(`(?<![\\p{L}\\p{N}])(?:${alts.join('|')})(?![\\p{L}\\p{N}'’-])`, 'giu') : null
 }
-// Words inside quotation marks (straight quotes within a line, or curly quotes).
-export const dialogueWords = (text: string) => (text.match(/“[^”]*”|"[^"\n]*"/g) ?? []).reduce((n, q) => n + wordsOf(q).length, 0)
 // Markdown → prose for counting: headings and scene breaks dropped, emphasis marks and escapes removed.
-export const proseText = (md: string) => md.split('\n').filter((l) => !/^#|^\s*(\*\s*){3}$/.test(l)).join('\n')
+const proseText = (md: string) => md.split('\n').filter((l) => !/^#|^\s*(\*\s*){3}$/.test(l)).join('\n')
   .replace(/[*_`>~]+/g, ' ').replace(/\\(.)/g, '$1')
 
 // Where the book's running word count crosses a quarter, half and three quarters: the scene it happens in.
@@ -73,24 +64,26 @@ export function overusedRanges(text: string, words: WordLists = DEFAULT_WORDS) {
   return out.sort((a, b) => a.from - b.from)
 }
 
-// Quotes in `text` (as dialogueWords finds them), as ranges.
+// Quotes in `text` as ranges: straight quotes within a line, or curly quotes.
 export const quoteRanges = (text: string) => [...text.matchAll(/“[^”]*”|"[^"\n]*"/g)].map((m) => ({ from: m.index, to: m.index + m[0].length }))
 const top = (m: Map<string, number>, n: number, min = 2): Count[] =>
   [...m].filter(([, c]) => c >= min).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, n)
 const bump = (m: Map<string, number>, k: string) => m.set(k, (m.get(k) ?? 0) + 1)
 
 // md: the compiled book (headings are titles, `* * *` scene breaks), as /compile?format=md returns it.
-export function proseStats(md: string, words: WordLists = DEFAULT_WORDS): ProseStats {
+// names: titles and aliases of the project's named things (characters, places), left out of the most used words.
+export function proseStats(md: string, words: WordLists = DEFAULT_WORDS, names: string[] = []): ProseStats {
   const text = proseText(md)
   const all = wordsOf(text)
   const sentences = text.split(/[.!?…]+["”’)]*(?=\s|$)|\n\s*\n/).map(wordsOf).filter((s) => s.length)
+  // Whole names only ("Old Man Willow" hides that phrase, not every "old"), possessives included.
+  const named = checkPattern(names.flatMap((n) => [n, `${n}'s`, `${n}’s`]))
 
   const freq = new Map<string, number>()
   const adverbs = new Map<string, number>()
-  for (const w of all) {
+  for (const w of named ? wordsOf(text.replace(named, ' ')) : all)
     if (!STOP.has(w) && w.length > 2 && !/^\d+$/.test(w)) bump(freq, w)
-    if (isAdverb(w, words.notAdverbs)) bump(adverbs, w)
-  }
+  for (const w of all) if (isAdverb(w, words.notAdverbs)) bump(adverbs, w)
   // Three-word phrases within a sentence, skipping ones made only of stop words ("and then the").
   const phrases = new Map<string, number>()
   for (const s of sentences)

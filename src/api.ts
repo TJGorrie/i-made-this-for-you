@@ -12,23 +12,21 @@ export const MANUSCRIPT_TYPES = ['book', 'chapter', 'scene']
 // Frontmatter keys the app manages itself; never shown as editable text fields.
 export const RESERVED_FIELDS = ['id', 'type', 'title', 'body', 'parent', 'order', 'relationships', 'pins', 'path', 'words', 'review']
 
-// Dialogue tagged with who says it (src/speaker.ts): {%the line%}{@[[Name|id]]}. The speaker is a link, so it's indexed like one.
+// Dialogue tagged with who says it (src/tags.ts): {%the line%}{@[[Name|id]]}. The speaker is a link, so it's indexed like one.
 export const SPEAKER = /\{%([\s\S]+?)%\}\{@\[\[([^\]|]*)\|([^\]]+)\]\]\}/g
 export const speakerLines = (md: string) => [...md.matchAll(SPEAKER)].map((m) => ({ text: m[1], title: m[2], id: m[3] }))
-// Text describing a property of an entry (src/described.ts): {^grey eyes^}{#[[Name|id]]:eyes}. index: nth description in the text.
+// Text describing a property of an entry (src/tags.ts): {^grey eyes^}{#[[Name|id]]:eyes}. index: nth description in the text.
 export const DESCRIBED = /\{\^([\s\S]+?)\^\}\{#\[\[([^\]|]*)\|([^\]]+)\]\]:([^}]*)\}/g
 export const descriptions = (md: string) =>
   [...md.matchAll(DESCRIBED)].map((m, index) => ({ text: m[1], title: m[2], id: m[3], prop: m[4], index }))
 // Tagged dialogue and descriptions → just their text.
 export const stripTags = (md: string) => md.replace(SPEAKER, '$1').replace(DESCRIBED, '$1')
 
-// Markdown → plain text for previews and snippets: links become their titles, markup characters go.
-export const plainText = (md: string) =>
-  stripTags(md).replace(/\[\[([^\]|]*)\|[^\]]+\]\]/g, '$1').replace(/[#>*_`~]+|^-{3,}$/gm, ' ').replace(/\s+/g, ' ').trim()
-
 // Stored markup as you'd read it: [[Name|id]] links show their name, inline comments and tagged dialogue just their text.
 export const readable = (md: string) =>
   stripTags(md).replace(/\[\[([^\]|]*)\|[^\]]+\]\]/g, '$1').replace(/\{==([\s\S]+?)==\}\{>>[\s\S]*?<<\}/g, '$1')
+// Markdown → plain text for previews and snippets: readable, with markup characters and line breaks gone.
+export const plainText = (md: string) => readable(md).replace(/[#>*_`~]+|^-{3,}$/gm, ' ').replace(/\s+/g, ' ').trim()
 
 // Template field spec:
 //   "pov:character"        → `pov` holds one [[link]] to a character

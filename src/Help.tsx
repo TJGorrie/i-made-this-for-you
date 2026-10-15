@@ -14,6 +14,7 @@ const SHORTCUTS: [keys: string, what: string][] = [
   [`${mod}+B / ${mod}+I`, 'Bold / italic'],
   [`${mod}+Z / ${mod}+Shift+Z`, 'Undo / redo'],
   [`${mod}+K`, 'Search everything'],
+  [`${mod}+\\`, 'Hide / show the sidebar'],
   ['Shift+click', 'Open an entry beside the one you have open'],
   [`${mod}+click a link`, 'Open the linked entry'],
   ['Enter / Esc', 'Save / cancel a comment or note'],

@@ -36,8 +36,15 @@ export async function dropOn(slug: string, rows: Row[], drag: Row, target: Row) 
   if (drag.type === target.type) {
     const sibs = (target.type === 'book' ? rows.filter((r) => r.type === 'book').sort(byOrder) : kids(target.parent!)).filter((s) => s.id !== drag.id)
     const prev = sibs[sibs.indexOf(target) - 1]
-    // improvement: fractional order means one file write per move; renumber siblings if ~50 drops into the same gap ever exhaust float precision.
+    // Fractional order: one file write per move. After ~50 drops into the same gap the halves stop being distinct,
+    // so then every sibling is renumbered 1, 2, 3… instead.
     order = prev ? ((prev.order ?? 0) + (target.order ?? 0)) / 2 : (target.order ?? 0) - 1
+    if (prev && (order === prev.order || order === target.order)) {
+      const moved = [...sibs.slice(0, sibs.indexOf(target)), drag, ...sibs.slice(sibs.indexOf(target))]
+      await Promise.all(moved.map((r, i) => api(`/projects/${slug}/entities/${r.id}`, 'PUT', r === drag ? { parent, order: i + 1 } : { order: i + 1 })))
+        .catch((e) => alert(e.message))
+      return
+    }
   } else if ((drag.type === 'scene' && target.type === 'chapter') || (drag.type === 'chapter' && target.type === 'book')) {
     parent = target.id
     order = (kids(target.id).filter((s) => s.id !== drag.id).at(-1)?.order ?? 0) + 1

@@ -96,4 +96,12 @@ test('aliases: @ by any name, alias text survives renames and compile', async ({
   expect(readFile(scene)).toContain(`[[The Fox|${ana.id}]] met [[Ana Thorne|${ana.id}]]`)
   const md = await (await page.request.get(`/api/projects/${slug}/books/${book.id}/compile`)).text()
   expect(md).toContain('The Fox met Ana Thorne')
+
+  // Rename the alias chip: every link written as it follows.
+  await page.getByRole('button', { name: 'Ana Thorne', exact: true }).click()
+  const chip = page.getByLabel('Alias The Fox')
+  await chip.fill('Red Fox')
+  await chip.press('Enter')
+  await expect(page.locator('.statusbar')).toContainText('Saved')
+  await expect.poll(() => readFile(scene)).toContain(`[[Red Fox|${ana.id}]] met [[Ana Thorne|${ana.id}]]`)
 })

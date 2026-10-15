@@ -274,7 +274,6 @@ test('tag dialogue with its speaker: saved, counted per speaker, listed on the c
   await page.getByRole('button', { name: 'Prose stats' }).click()
   const table = page.getByRole('region', { name: 'Dialogue by speaker' })
   await expect(table.locator('tr', { hasText: 'Ana' })).toHaveText(/Ana\s*1 line in 1 scene\s*2 words\s*100% of tagged dialogue/)
-  await expect(table).toContainText("About 1 word of quoted dialogue aren't tagged")
 
   await page.locator('aside').getByRole('button', { name: 'Ana', exact: true }).click()
   const lines = page.locator('.spoken-lines')

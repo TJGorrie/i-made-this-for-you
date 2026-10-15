@@ -1,5 +1,5 @@
 // Entity editor: title + template fields + rich-text body, autosaved.
-import { useEffect, useRef, useState, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
 import { useEditor, EditorContent } from '@tiptap/react'
 import { BubbleMenu } from '@tiptap/react/menus'
 import StarterKit from '@tiptap/starter-kit'
@@ -9,10 +9,9 @@ import { Backlinks, Descriptions, LinkPreview, SpokenLines, type Passage } from 
 import { RelationshipList } from './Relationships.tsx'
 import { MapView } from './MapView.tsx'
 import { HistoryPanel } from './History.tsx'
-import { api, fieldText, fingerprint, MANUSCRIPT_TYPES, parseField, parseLink, RESERVED_FIELDS, reviewNotes, STATUSES, uploadImage, type Entity } from './api.ts'
+import { aliasesOf, api, fieldText, fingerprint, MANUSCRIPT_TYPES, parseField, parseLink, RESERVED_FIELDS, reviewNotes, STATUSES, uploadImage, type Entity } from './api.ts'
 import { Comment, commentRanges, markRanges } from './comment.ts'
-import { Speaker } from './speaker.ts'
-import { Described } from './described.ts'
+import { Described, Speaker, toMarkdown } from './tags.ts'
 import { Focus } from './focus.ts'
 import { Overused } from './overused.ts'
 import { DEFAULT_WORDS, type WordLists } from './prose.ts'
@@ -120,7 +119,7 @@ function Form({ initial, url, fields: specs, targets, onSaved, onDeleted, onOpen
 
   function flush(keepalive: boolean) {
     clearTimeout(timer.current)
-    if (bodyDirty.current && editor) pending.current.body = editor.getMarkdown()
+    if (bodyDirty.current && editor) pending.current.body = toMarkdown(editor)
     bodyDirty.current = false
     if (conflictRef.current) return // hold edits until the user resolves the conflict
     const patch = pending.current
@@ -200,38 +199,27 @@ function Form({ initial, url, fields: specs, targets, onSaved, onDeleted, onOpen
     setDraft(inside ? { from: inside.from, to: inside.to, note: inside.note, done: inside.done } : { from, to, note: '', done: false })
   }
 
-  // Speaker: pick who says the selected dialogue.
-  const [tagging, setTagging] = useState<{ from: number; to: number } | null>(null)
-  function setSpeaker(id: string) {
-    const type = editor?.schema.marks.speaker
-    if (!editor || !type || !tagging) return
-    const t = targets.find((t) => t.id === id)
-    const tr = editor.state.tr.removeMark(tagging.from, tagging.to, type)
-    editor.view.dispatch(t ? tr.addMark(tagging.from, tagging.to, type.create({ id: t.id, title: t.title })) : tr)
-    setTagging(null)
-    editor.commands.focus()
-  }
-  // Describe: mark the selected text as describing a property of an entry ("grey eyes" → Ana's eyes).
-  // Inside an existing description it edits that one.
-  type Describing = { from: number; to: number; id: string; prop: string }
-  const [describing, setDescribing] = useState<Describing | null>(null)
-  function describe() {
+  // Speaker: pick who says the selected dialogue. Describe: mark the selected text as describing a property of
+  // an entry ("grey eyes" → Ana's eyes); inside an existing description it edits that one.
+  type Picker = { mark: 'speaker' | 'described'; from: number; to: number; id: string; prop: string }
+  const [picker, setPicker] = useState<Picker | null>(null)
+  function pick(mark: Picker['mark']) {
     if (!editor) return
     const { from, to } = editor.state.selection
-    const inside = markRanges(editor.state.doc, 'described').find((r) => r.from <= from && to <= r.to)
-    setDescribing(inside ? { from: inside.from, to: inside.to, id: inside.attrs.id, prop: inside.attrs.prop } : { from, to, id: '', prop: '' })
+    const inside = mark === 'described' && markRanges(editor.state.doc, mark).find((r) => r.from <= from && to <= r.to)
+    setPicker(inside ? { mark, from: inside.from, to: inside.to, id: inside.attrs.id, prop: inside.attrs.prop } : { mark, from, to, id: '', prop: '' })
   }
-  function setDescribed(id: string, prop: string) { // empty id: remove the description
-    const type = editor?.schema.marks.described
-    if (!editor || !type || !describing) return
+  function tag(id: string, prop = '') { // unknown or empty id: remove the tag
+    const type = picker && editor?.schema.marks[picker.mark]
+    if (!editor || !type) return
     const t = targets.find((t) => t.id === id)
-    const tr = editor.state.tr.removeMark(describing.from, describing.to, type)
-    editor.view.dispatch(t ? tr.addMark(describing.from, describing.to, type.create({ id: t.id, title: t.title, prop })) : tr)
+    const tr = editor.state.tr.removeMark(picker.from, picker.to, type)
+    editor.view.dispatch(t ? tr.addMark(picker.from, picker.to, type.create({ id: t.id, title: t.title, ...(prop && { prop }) })) : tr)
     closeMenu()
   }
   const menuOpen = useRef(false) // a picker is open in the bubble: keep it shown while focus is in it
-  menuOpen.current = !!tagging || describing !== null
-  const closeMenu = () => { setTagging(null); setDescribing(null); editor?.commands.focus() }
+  menuOpen.current = picker !== null
+  const closeMenu = () => { setPicker(null); editor?.commands.focus() }
   const speakers = [...targets].sort((a, b) => +(a.type !== 'character') - +(b.type !== 'character'))
 
   // Template fields first, then any extra text fields this entity has (added here or by hand in the file).
@@ -293,6 +281,8 @@ function Form({ initial, url, fields: specs, targets, onSaved, onDeleted, onOpen
               : linkType
               ? <LinkField name={name} value={fieldText(values[name])} options={optionsFor(linkType)}
                   onChange={(v) => set(name, v)} onOpen={onOpen} note={ageOf} />
+              : name === 'aliases'
+              ? <AliasField value={values[name]} onChange={(v) => set(name, v)} />
               : name === 'status'
               ? <><input list="statuses" aria-label={name} value={fieldText(values[name])} onChange={(e) => set(name, e.target.value)} />
                   <datalist id="statuses">{STATUSES.map((s) => <option key={s} value={s} />)}</datalist></>
@@ -341,22 +331,22 @@ function Form({ initial, url, fields: specs, targets, onSaved, onDeleted, onOpen
                 : element.contains(document.activeElement) ? menuOpen.current
                 : !state.selection.empty && view.dom.contains(getSelection()?.anchorNode ?? null) && !!state.doc.textBetween(state.selection.from, state.selection.to).trim()}>
             <div className="bubble-row" onKeyDown={(e) => e.key === 'Escape' && closeMenu()}>
-              {tagging ? (
-                <select autoFocus aria-label="Who says it" value="" onChange={(e) => setSpeaker(e.target.value)} onBlur={() => setTagging(null)}>
+              {picker?.mark === 'speaker' ? (
+                <select autoFocus aria-label="Who says it" value="" onChange={(e) => tag(e.target.value)} onBlur={() => setPicker(null)}>
                   <option value="">Who says it…</option>
                   <option value="-">(not tagged)</option>
                   {speakers.map((t) => <option key={t.id} value={t.id}>{t.type === 'character' ? t.title : `${t.title} (${t.type})`}</option>)}
                 </select>
-              ) : describing !== null ? (
-                <DescribeForm initial={describing} url={url} targets={targets.filter((t) => t.id !== values.id)} onSave={setDescribed} />
+              ) : picker ? (
+                <DescribeForm initial={picker} url={url} targets={targets.filter((t) => t.id !== values.id)} onSave={tag} />
               ) : (
                 // preventDefault on mousedown: the click mustn't take focus (and the selection) away from the text.
                 <span onMouseDown={(e) => e.preventDefault()}>
                   <button className="mini" onClick={comment} title="Comment on the selected text (or edit the comment it's in)">Comment</button>
                   {!reviewing && <button className="mini" title="Add the selected text to a property of an entry"
-                    onClick={describe}>Describe</button>}
+                    onClick={() => pick('described')}>Describe</button>}
                   {!reviewing && MANUSCRIPT_TYPES.includes(values.type) && <button className="mini" title="Tag the selected dialogue with who says it"
-                    onClick={() => setTagging({ from: editor.state.selection.from, to: editor.state.selection.to })}>Speaker</button>}
+                    onClick={() => pick('speaker')}>Speaker</button>}
                 </span>
               )}
             </div>
@@ -441,6 +431,32 @@ function LinkListField({ name, value, options, showType, onChange, onOpen, note 
   )
 }
 
+// Other names as chips. Editing a chip renames that alias, and the server renames every link written as it
+// (server/indexer.ts aliasRenames), so a chip only saves on Enter or leaving it, not mid-word.
+function AliasField({ value, onChange }: { value: unknown; onChange: (v: string[]) => void }) {
+  const items = aliasesOf(value)
+  const commit = (i: number, text: string) => {
+    const v = text.trim()
+    if (v !== (items[i] ?? '')) onChange(v ? Object.assign([...items], { [i]: v }) : items.filter((_, j) => j !== i))
+  }
+  const keys = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); e.currentTarget.blur() }
+  }
+  return (
+    <div className="link-list">
+      {items.map((a, i) => (
+        <span key={`${i}:${a}`} className="chip">
+          <input aria-label={`Alias ${a}`} defaultValue={a} size={Math.max(a.length, 3)} onKeyDown={keys}
+            onBlur={(e) => commit(i, e.target.value)} />
+          <button className="chip-x" aria-label={`Remove ${a}`} onClick={() => commit(i, '')}>×</button>
+        </span>
+      ))}
+      <input key={items.length} aria-label="aliases" placeholder="+ alias" onKeyDown={keys}
+        onBlur={(e) => commit(items.length, e.target.value)} />
+    </div>
+  )
+}
+
 // A field holding a [[link]] to one entity of a given type (e.g. a scene's POV character).
 function LinkField({ name, value, options, onChange, onOpen, note }: {
   name: string; value: string; options: LinkTarget[]; onChange: (v: string) => void; onOpen: (id: string) => void
@@ -477,7 +493,7 @@ function DescribeForm({ initial, url, targets, onSave }: {
   useEffect(() => {
     setKeys([])
     const entityUrl = url.replace(/[^/]+$/, id)
-    if (id) Promise.all([api(entityUrl), api(entityUrl + '/descriptions')]).then(([e, ds]: [Entity, { prop: string }[]]) => setKeys([...new Set([
+    if (id) Promise.all([api(entityUrl), api(entityUrl + '/tagged')]).then(([e, { descriptions: ds }]: [Entity, { descriptions: { prop: string }[] }]) => setKeys([...new Set([
       ...Object.keys(e).filter((k) => !RESERVED_FIELDS.includes(k) && (e[k] == null || typeof e[k] !== 'object')), ...ds.map((d) => d.prop),
     ])]))
   }, [id])

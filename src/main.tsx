@@ -141,6 +141,7 @@ function ProjectView({ slug, onClose }: { slug: string; onClose: () => void }) {
   const [review, setReview] = useState<ReviewEntry[]>([])
   const [focusItem, setFocusItem] = useState<Passage>() // passage to select when the editor opens
   const [menu, setMenu] = useState(false) // narrow screens: the sidebar opens over the page
+  const [hideSide, setHideSide] = useState(() => { try { return localStorage.getItem('sidebar') === 'hidden' } catch { return false } }) // wide screens
   const [shortcuts, setShortcuts] = useState(false)
   const [links, setLinks] = useState<Link[]>([])
   const [epoch, setEpoch] = useState(0) // bumped when files change behind open editors (find & replace): they reload
@@ -160,6 +161,7 @@ function ProjectView({ slug, onClose }: { slug: string; onClose: () => void }) {
     addEventListener('focus', onFocus)
     return () => removeEventListener('focus', onFocus)
   }, [slug])
+  useEffect(() => { try { localStorage.setItem('sidebar', hideSide ? 'hidden' : 'shown') } catch {} }, [hideSide])
   useEffect(() => {
     if (!focus) return
     const pm = document.querySelector('.prose .ProseMirror')
@@ -168,14 +170,17 @@ function ProjectView({ slug, onClose }: { slug: string; onClose: () => void }) {
     addEventListener('keydown', onKey)
     return () => { removeEventListener('keydown', onKey); pm?.removeAttribute('spellcheck') }
   }, [focus])
-  // Ctrl/⌘+K: search. "?" (when not typing): the shortcuts sheet.
+  // Ctrl/⌘+K: search. Ctrl/⌘+\: hide/show the sidebar. "?" (when not typing): the shortcuts sheet.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const typing = (e.target as HTMLElement).closest?.('input, textarea, select, [contenteditable="true"]')
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault()
-        setFocus(false); setMenu(true)
+        setFocus(false); setMenu(true); setHideSide(false)
         setTimeout(() => searchRef.current?.focus()) // after focus mode / the menu has shown the sidebar
+      } else if ((e.ctrlKey || e.metaKey) && e.key === '\\') {
+        e.preventDefault()
+        setHideSide((h) => !h)
       } else if (e.key === '?' && !typing) setShortcuts(true)
     }
     addEventListener('keydown', onKey)
@@ -234,14 +239,17 @@ function ProjectView({ slug, onClose }: { slug: string; onClose: () => void }) {
   )
 
   return (
-    <div className={`app ${focus ? 'focus' : ''} ${menu ? 'menu-open' : ''} ${typewriter ? 'typewriter' : ''} ${dim ? 'dim' : ''} ${highlight ? `highlight-${highlight}` : ''}`}>
-      <button className="mini menu-toggle" aria-expanded={menu} onClick={() => setMenu(!menu)}>☰ {project.name}</button>
+    <div className={`app ${focus ? 'focus' : ''} ${menu ? 'menu-open' : ''} ${hideSide ? 'side-hidden' : ''} ${typewriter ? 'typewriter' : ''} ${dim ? 'dim' : ''} ${highlight ? `highlight-${highlight}` : ''}`}>
+      <button className="mini menu-toggle" aria-expanded={menu}
+        onClick={() => matchMedia('(max-width: 760px)').matches ? setMenu(!menu) : setHideSide(false)}
+        title="Show the sidebar">☰ <span className="menu-name">{project.name}</span></button>
       <aside>
         <div className="aside-head">
           <button className="link" onClick={onClose}>&larr; Projects</button>
           <span>
             <button className="mini" onClick={() => setShortcuts(true)} title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts">⌨</button>{' '}
-            <ThemeToggle />
+            <ThemeToggle />{' '}
+            <button className="mini side-collapse" onClick={() => setHideSide(true)} title="Hide the sidebar (Ctrl+\)" aria-label="Hide the sidebar">«</button>
           </span>
         </div>
         <h3>{project.name}</h3>

@@ -4,17 +4,23 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { createProject, newEntityPath, newId, parseEntity, projectFiles, readEntity, restoreProject, writeEntity } from './store.ts'
-import { backlinks, countWords, findPattern, indexFile, linkTargets, openIndex, proseMatches, resolveLinks, search, spliceMatches } from './indexer.ts'
+import { aliasRenames, backlinks, countWords, findPattern, indexFile, linkTargets, openIndex, proseMatches, renameAliasLinks, resolveLinks, search, spliceMatches } from './indexer.ts'
 import { enforceCap, historyBytes, listSnapshots, prune, readSnapshot, snapshot } from './history.ts'
-import { projection, recordDay, streak, type Goals } from './goals.ts'
+import { goalsTurn, projection, readGoals, recordDay, streak, writeGoals, type Goals } from './goals.ts'
 import { calendarLabel, compareDates, linkText, readable, descriptions, speakerLines, stripTags } from '../src/api.ts'
 import { reviewItems, setInline } from './review.ts'
 import { stripComments } from './indexer.ts'
 import { docx, docxToMarkdown, epub, importMarkdown, unzip as unzipFiles, zip } from './export.ts'
 import { diffWords } from '../src/diff.ts'
-import { beats, dialogueWords, overusedRanges, proseStats, proseText } from '../src/prose.ts'
+import { beats, overusedRanges, proseStats } from '../src/prose.ts'
 import { ageAt, birthYears, continuity } from '../src/continuity.ts'
 import { inflateRawSync, crc32 } from 'node:zlib'
+import { getSchema, type Editor } from '@tiptap/core'
+import StarterKit from '@tiptap/starter-kit'
+import { MarkdownManager } from '@tiptap/markdown'
+import { Comment } from '../src/comment.ts'
+import { WikiLink } from '../src/wikiLink.ts'
+import { Described, Speaker, toMarkdown } from '../src/tags.ts'
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'writing-tool-'))
 try {
@@ -45,6 +51,13 @@ try {
   assert.equal(stripTags(desc), 'Her grey eyes met "Hi"')
   assert.equal(countWords(desc), 5)
   assert.deepEqual(descriptions(desc).map((d) => [d.text, d.id, d.prop, d.index]), [['grey eyes', 'a1', 'eyes', 0], ['Hi', 'b2', 'voice', 1]])
+  // Editor round trip: an @-link inside a comment, tagged line or description stays inside it (also when it's the last thing in it).
+  const exts = [StarterKit, Comment, WikiLink, Speaker, Described]
+  getSchema(exts)
+  const mm = new MarkdownManager({ extensions: exts })
+  for (const md of ['X {==a [[Ana|a1]] b==}{>>n<<}. Y', 'X {^eyes like [[Ana|a1]]^}{#[[Bea|b2]]:eyes}. Y',
+    'A {%"Hi [[Ana|a1]] and [[Bea|b2]]"%}{@[[Bea|b2]]} b. [[Al_x*|c3]]', '{==[[Ana|a1]]==}{>>only<<}'])
+    assert.equal(toMarkdown({ markdown: mm, getJSON: () => mm.parse(md) } as unknown as Editor), md)
 
   // Review: inline comments (done = [x] prefix) and frontmatter notes, ticked off by index.
   const body = 'A {==b==}{>>first<<} c {==d **e**==}{>>[x] second<<}.'
@@ -110,6 +123,22 @@ try {
     '<w:r><w:t>2*3 &amp; </w:t></w:r><w:r><w:rPr><w:b w:val="0"/></w:rPr><w:t>x</w:t></w:r></w:p><w:p><w:r><w:t>#</w:t></w:r></w:p></w:body></w:document>'
   assert.equal(docxToMarkdown(zip([{ name: 'word/document.xml', data: runsXml }])), '*Hello* 2\\*3 & x\n\n* * *')
   assert.throws(() => docxToMarkdown(zip([{ name: 'other.xml', data: '' }])), /Word document/)
+  // Styles by built-in name, so a German Word's "Überschrift1" is still a chapter heading.
+  const styled = (id: string, text: string) => `<w:p><w:pPr><w:pStyle w:val="${id}"/></w:pPr><w:r><w:t>${text}</w:t></w:r></w:p>`
+  assert.equal(docxToMarkdown(zip([
+    { name: 'word/document.xml', data: `<w:document><w:body>${styled('Titel', 'Salz')}${styled('berschrift1', 'Eins')}${styled('berschrift2', 'Teil')}</w:body></w:document>` },
+    { name: 'word/styles.xml', data: '<w:styles><w:style w:type="paragraph" w:styleId="Titel"><w:name w:val="Title"/></w:style>' +
+      '<w:style w:type="paragraph" w:styleId="berschrift1"><w:name w:val="heading 1"/></w:style><w:style w:styleId="berschrift2"><w:name w:val="heading 2"/></w:style></w:styles>' },
+  ])), '# Salz\n\n## Eins\n\n### Teil')
+  // No ## headings: plain "Chapter 7" lines (bold from Word, numbers in words or numerals) start chapters; prose mentioning one doesn't.
+  assert.deepEqual(importMarkdown('Intro.\n\n**Chapter One**\n\nA.\n\nChapter twenty-two: The Fall\n\nChapter 3 was long, she said.\n\nCHAPTER IV.\n\nB.', 'f').chapters,
+    [{ title: 'Untitled chapter', scenes: ['Intro.'] }, { title: 'Chapter One', scenes: ['A.'] },
+      { title: 'Chapter twenty-two: The Fall', scenes: ['Chapter 3 was long, she said.'] }, { title: 'CHAPTER IV.', scenes: ['B.'] }])
+  assert.equal(importMarkdown('## One\n\nChapter 2\n\nA.', 'f').chapters.length, 1) // real headings win
+  // Zip64 past 65,535 files.
+  const many = unzipFiles(zip(Array.from({ length: 70_000 }, (_, i) => ({ name: `f${i}`, data: String(i), store: true }))))
+  assert.equal(many.size, 70_000)
+  assert.equal(many.get('f69999')!.toString(), '69999')
 
   // Word diff: unchanged words kept, changes marked, whitespace preserved.
   assert.deepEqual(diffWords('The grey cat sat.', 'The black cat sat down.'), [
@@ -122,6 +151,13 @@ try {
   const [va, vb] = ['one two three four five six', 'one 2 three five six seven']
   assert.equal(rebuilt(diffWords(va, vb), '+'), va)
   assert.equal(rebuilt(diffWords(va, vb), '-'), vb)
+  // Too big for one word table: paragraphs are matched first, then words within the changed ones.
+  const words = (n: number, w: string) => Array.from({ length: n }, (_, i) => `${w}${i}`).join(' ')
+  const [bigA, bigB] = [`${words(50, 'x')}\n\n${words(2000, 'm')}\n\n${words(50, 'y')}`, `${words(50, 'x').replace('x7 ', 'X7 ')}\n\n${words(2000, 'm')}\n\n${words(50, 'z')}`]
+  const big = diffWords(bigA, bigB)
+  assert.deepEqual(big.filter((p) => p.op !== '=').slice(0, 2), [{ op: '-', text: 'x7' }, { op: '+', text: 'X7' }])
+  assert.equal(rebuilt(big, '+'), bigA)
+  assert.equal(rebuilt(big, '-'), bigB)
 
   // Prose stats.
   const ps = proseStats('# Book\n\n## One\n\nShe ran quickly. "Run," he said, "run really fast."\n\n* * *\n\nShe ran quickly home. She ran quickly again.')
@@ -130,8 +166,12 @@ try {
   assert.deepEqual(ps.phrases, [['she ran quickly', 3]])
   assert.deepEqual(ps.topWords.slice(0, 3), [['quickly', 3], ['ran', 3], ['run', 2]])
   assert.deepEqual(ps.crutches, [['really', 1]])
+  // Named things (titles and aliases) are left out of the most used words.
+  assert.deepEqual(proseStats('Strider ran. Strider’s horse ran.', undefined, ['Aragorn', 'Strider']).topWords, [['ran', 2]])
+  // Whole names only: "Old Man Willow" doesn't hide the old man on his own.
+  assert.deepEqual(proseStats('Old Man Willow slept. The old man slept. The old man woke.', undefined, ['Old Man Willow']).topWords,
+    [['man', 2], ['old', 2], ['slept', 2]])
 
-  assert.equal(dialogueWords(proseText('She ran quickly. "Run," he said, "run really fast."')), 4)
 
   // Beats: the scene where the running total crosses ¼, ½, ¾; empty scenes never get one.
   const bs = (ws: number[]) => beats(ws.map((words, i) => ({ id: `s${i}`, words }))).map((b) => `${b.sceneId}:${b.beat}`)
@@ -201,6 +241,14 @@ try {
   // Compile shows current titles even if the stored one is stale; unknown ids keep the stored title.
   assert.equal(resolveLinks(db, `Saw [[Old Name|${ana.id}]] and [[Ghost|nope]].`), 'Saw Ana and Ghost.')
   assert.equal(resolveLinks(db, `[[the fox|${fox.id}]] met [[Fox|${fox.id}]].`), 'the fox met Ana Vale.') // alias kept
+  // Renaming an alias in place renames links written as it; adds, removes and swaps aren't renames.
+  const fr = aliasRenames('The Fox, Vixen', ['Red Fox', 'Vixen'])
+  assert.deepEqual([...fr], [['the fox', 'Red Fox']])
+  assert.deepEqual(renameAliasLinks({ body: `[[the fox|${fox.id}]] [[Vixen|${fox.id}]] [[The Fox|other]]`, appears: [`[[The Fox|${fox.id}]]`] }, fox.id, fr),
+    { body: `[[Red Fox|${fox.id}]] [[Vixen|${fox.id}]] [[The Fox|other]]`, appears: [`[[Red Fox|${fox.id}]]`] })
+  assert.equal(aliasRenames('A, B', 'B, A').size, 0)
+  assert.equal(aliasRenames('A, B', 'A').size, 0)
+  assert.equal(aliasRenames('A', 'A, B').size, 0)
   // Links inside fields (e.g. pov) count too.
   assert.deepEqual(
     linkTargets({ id: 'q', type: 'scene', title: 'Q', pov: `[[Ana|${ana.id}]]`, appears: [`[[Ana|${ana.id}]]`, '[[B|b1]]'], body: '[[B|b1]] [[B|b1]]' }),
@@ -265,6 +313,10 @@ try {
   assert.ok(historyBytes(dir) > 1000) // can't go lower without losing an entity's last version
 
   // ---- Goals: net words per day, streaks ----
+  // Two requests changing goals.json at once (a stats refresh and a finished sprint) both keep their change.
+  const change = (f: (g: Goals) => void) => goalsTurn(async () => { const g = readGoals(dir); f(g); await writeGoals(dir, g) })
+  await Promise.all([change((g) => { g.daily = 5 }), change((g) => { g.sprints = [{ at: 1, minutes: 1, words: 1 }] })])
+  assert.deepEqual([readGoals(dir).daily, readGoals(dir).sprints?.length], [5, 1])
   const g: Goals = { daily: 100, days: {} }
   recordDay(g, '2026-03-01', 1000); recordDay(g, '2026-03-01', 1150)
   recordDay(g, '2026-03-02', 1150); recordDay(g, '2026-03-02', 1300)

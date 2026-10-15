@@ -11,10 +11,10 @@ import {
 import {
   deletedEntities, historyBytes, historyMaxBytes, listSnapshots, readMeta, readSnapshot, snapshot, writeMeta,
 } from './history.ts'
-import { localDate, projection, readGoals, recordDay, streak, writeGoals } from './goals.ts'
+import { goalsTurn, localDate, projection, readGoals, recordDay, streak, writeGoals } from './goals.ts'
 import {
-  backlinks, countWords, findPattern, indexFile, openIndex, proseMatches, reindexFolder, removePath, resolveLinks, search, spliceMatches,
-  stripComments, watchProject,
+  aliasRenames, backlinks, countWords, findPattern, indexFile, openIndex, proseMatches, reindexFolder, removePath, renameAliasLinks, resolveLinks,
+  search, spliceMatches, stripComments, watchProject,
 } from './indexer.ts'
 import { marked } from 'marked'
 import { createHash } from 'node:crypto'
@@ -201,41 +201,23 @@ app.get('/projects/:p/entities/:id/backlinks', (c) => {
   return c.json(backlinks(db, c.req.param('id')))
 })
 
-// Everything this entry says (dialogue tagged with it as the speaker), scene by scene in reading order.
-const fieldsOf = (db: DatabaseSync, id: string) =>
-  JSON.parse((db.prepare('select fields from entities where id = ?').get(id) as { fields: string } | undefined)?.fields ?? '{}')
-function readingKey(db: DatabaseSync, id: string) {
-  const key: number[] = []
-  for (let f = fieldsOf(db, id), depth = 0; depth < 4; depth++) { // scene → chapter → book
-    key.unshift(f.order ?? 0)
-    if (!f.parent) break
-    f = fieldsOf(db, f.parent)
-  }
-  return key
-}
-const byKey = (a: number[], b: number[]) => a.reduce((d, n, i) => d || n - (b[i] ?? 0), 0) || a.length - b.length
-
-// Entries whose text links to this one, in reading order, with their bodies.
-function linkedBodies(dir: string, db: DatabaseSync, id: string) {
-  const from = db.prepare(`select distinct from_id from links where to_id = ? and field = 'body'`).all(id) as { from_id: string }[]
-  return from.map((l) => ({ ...row(db, l.from_id), key: readingKey(db, l.from_id) })).sort((a, b) => byKey(a.key, b.key))
-    .map((s) => ({ id: s.id, title: s.title, body: readEntity(path.join(dir, s.path)).body ?? '' }))
-}
-
-app.get('/projects/:p/entities/:id/lines', (c) => {
+// What the text says about this entry, from every entry whose text links to it: scenes in reading order, then the rest.
+// lines: dialogue tagged with it as the speaker, by scene. descriptions: passages describing its properties
+// ({^grey eyes^}{#[[Ana|id]]:eyes}); index: nth description in that text.
+app.get('/projects/:p/entities/:id/tagged', (c) => {
   const { dir, db } = project(c.req.param('p'))
   const id = c.req.param('id')
-  return c.json(linkedBodies(dir, db, id)
-    .map((s) => ({ id: s.id, title: s.title, lines: speakerLines(s.body).filter((l) => l.id === id).map((l) => l.text) }))
-    .filter((s) => s.lines.length))
-})
-
-// Passages describing this entry's properties ({^grey eyes^}{#[[Ana|id]]:eyes}); index: nth description in that text.
-app.get('/projects/:p/entities/:id/descriptions', (c) => {
-  const { dir, db } = project(c.req.param('p'))
-  const id = c.req.param('id')
-  return c.json(linkedBodies(dir, db, id).flatMap((s) =>
-    descriptions(s.body).filter((d) => d.id === id).map((d) => ({ from: s.id, fromTitle: s.title, prop: d.prop, text: d.text, index: d.index }))))
+  const from = new Set((db.prepare(`select distinct from_id from links where to_id = ? and field = 'body'`).all(id) as { from_id: string }[]).map((l) => l.from_id))
+  const books = db.prepare(`select id from entities where type = 'book' order by json_extract(fields, '$.order')`).all() as { id: string }[]
+  const scenes = new Set(books.flatMap((b) => children(db, b.id).flatMap((ch) => children(db, ch.id).map((s) => s.id))))
+  const bodies = [...[...scenes].filter((s) => from.has(s)), ...[...from].filter((f) => !scenes.has(f))]
+    .map((f) => row(db, f)).map((s) => ({ id: s.id, title: s.title, body: readEntity(path.join(dir, s.path)).body ?? '' }))
+  return c.json({
+    lines: bodies.map((s) => ({ id: s.id, title: s.title, lines: speakerLines(s.body).filter((l) => l.id === id).map((l) => l.text) }))
+      .filter((s) => s.lines.length),
+    descriptions: bodies.flatMap((s) => descriptions(s.body).filter((d) => d.id === id)
+      .map((d) => ({ from: s.id, fromTitle: s.title, prop: d.prop, text: d.text, index: d.index }))),
+  })
 })
 
 app.get('/projects/:p/links', (c) => {
@@ -363,6 +345,18 @@ app.put('/projects/:p/entities/:id', async (c) => {
   await writeEntity(dir, target, entity)
   indexFile(db, dir, target)
   if (target !== rel) fs.rmSync(path.join(dir, rel)) // only after the new copy is safely written
+  // A renamed alias: links written as the old one take the new one everywhere (each changed file keeps a version first).
+  const renames = 'aliases' in patch ? aliasRenames(old.aliases, entity.aliases) : new Map()
+  for (const from of renames.size ? new Set((backlinks(db, id) as Row[]).map((r) => r.id)) : []) {
+    if (from === id) continue // this entry's own text is with the editor
+    const r = row(db, from)
+    const e = readEntity(path.join(dir, r.path))
+    const renamed = renameAliasLinks(e, id, renames) as Entity
+    if (JSON.stringify(renamed) === JSON.stringify(e)) continue
+    await snapshot(dir, r.id, r.path, { title: e.title, type: e.type }, { force: true })
+    await writeEntity(dir, r.path, renamed)
+    indexFile(db, dir, r.path)
+  }
   return c.json(entity)
 })
 
@@ -497,9 +491,8 @@ app.put('/projects/:p/templates', async (c) => {
 app.get('/projects/:p/stats', async (c) => {
   const { dir, db } = project(c.req.param('p'))
   const total = (db.prepare(`select coalesce(sum(words), 0) n from entities where type = 'scene'`).get() as { n: number }).n
-  const g = readGoals(dir)
   const date = localDate()
-  if (recordDay(g, date, total)) await writeGoals(dir, g)
+  const g = await goalsTurn(async () => { const g = readGoals(dir); if (recordDay(g, date, total)) await writeGoals(dir, g); return g })
   const days = Object.entries(g.days).sort().map(([date, d]) => ({ date, words: d.end - d.start }))
   // Words still to write: the books' targets, against everything written so far.
   const target = (db.prepare(`select fields from entities where type = 'book'`).all() as { fields: string }[])
@@ -514,27 +507,29 @@ app.post('/projects/:p/sprints', async (c) => {
   const { dir } = project(c.req.param('p'))
   const { at, minutes, words } = await c.req.json()
   if (![at, minutes, words].every(Number.isFinite) || minutes <= 0) throw new HTTPException(400, { message: 'Expected at, minutes and words' })
-  const g = readGoals(dir)
-  g.sprints = [...(g.sprints ?? []), { at, minutes, words }]
-  await writeGoals(dir, g)
-  return c.json(g.sprints, 201)
+  return c.json(await goalsTurn(async () => {
+    const g = readGoals(dir)
+    g.sprints = [...(g.sprints ?? []), { at, minutes, words }]
+    await writeGoals(dir, g)
+    return g.sprints
+  }), 201)
 })
 
 app.put('/projects/:p/goals', async (c) => {
   const { dir } = project(c.req.param('p'))
   // Either or both: { daily: n | null } and { deadline: 'YYYY-MM-DD' | null }. A field not sent is kept.
   const body = await c.req.json()
-  const g = readGoals(dir)
-  if ('daily' in body) {
-    if (body.daily !== null && !(Number.isInteger(body.daily) && body.daily > 0)) throw new HTTPException(400, { message: 'Daily goal must be a positive whole number' })
-    g.daily = body.daily ?? undefined
-  }
-  if ('deadline' in body) {
-    if (body.deadline !== null && !(typeof body.deadline === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(body.deadline)))
-      throw new HTTPException(400, { message: 'Deadline must be a date like 2027-03-01' })
-    g.deadline = body.deadline ?? undefined
-  }
-  await writeGoals(dir, g)
+  if ('daily' in body && body.daily !== null && !(Number.isInteger(body.daily) && body.daily > 0))
+    throw new HTTPException(400, { message: 'Daily goal must be a positive whole number' })
+  if ('deadline' in body && body.deadline !== null && !(typeof body.deadline === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(body.deadline)))
+    throw new HTTPException(400, { message: 'Deadline must be a date like 2027-03-01' })
+  const g = await goalsTurn(async () => {
+    const g = readGoals(dir)
+    if ('daily' in body) g.daily = body.daily ?? undefined
+    if ('deadline' in body) g.deadline = body.deadline ?? undefined
+    await writeGoals(dir, g)
+    return g
+  })
   return c.json({ daily: g.daily ?? null, deadline: g.deadline ?? null })
 })
 
@@ -645,6 +640,13 @@ app.get('/projects/:p/books/:id/compile', (c) => {
   return c.body(new Uint8Array(out), 200, { 'content-type': type, 'content-disposition': `attachment; filename="${name}${suffix}.${ext}"` })
 })
 
+// Set one key of project.json, returning its new value.
+async function setProjectKey(dir: string, key: string, value: unknown) {
+  const file = path.join(dir, 'project.json')
+  await atomicWrite(file, JSON.stringify({ ...JSON.parse(fs.readFileSync(file, 'utf8')), [key]: value }, null, 2))
+  return value
+}
+
 // Prose stats / Highlight word lists: { check, notAdverbs }, stored in project.json as `words`.
 app.put('/projects/:p/words', async (c) => {
   const { dir } = project(c.req.param('p'))
@@ -652,11 +654,7 @@ app.put('/projects/:p/words', async (c) => {
   const list = (v: unknown) => Array.isArray(v) && v.every((w) => typeof w === 'string')
   if (!list(check) || !list(notAdverbs)) throw new HTTPException(400, { message: 'Expected two lists of words' })
   const clean = (ws: string[]) => [...new Set(ws.map((w) => w.trim().replace(/\s+/g, ' ')).filter(Boolean))]
-  const file = path.join(dir, 'project.json')
-  const p = JSON.parse(fs.readFileSync(file, 'utf8'))
-  p.words = { check: clean(check), notAdverbs: clean(notAdverbs) }
-  await atomicWrite(file, JSON.stringify(p, null, 2))
-  return c.json(p.words)
+  return c.json(await setProjectKey(dir, 'words', { check: clean(check), notAdverbs: clean(notAdverbs) }))
 })
 
 // Timeline calendar: month names and an era label, stored in project.json.
@@ -665,9 +663,5 @@ app.put('/projects/:p/calendar', async (c) => {
   const { months, era } = await c.req.json()
   if (!Array.isArray(months) || !months.every((m) => typeof m === 'string' && m.trim()) || typeof era !== 'string')
     throw new HTTPException(400, { message: 'Expected month names and an era label' })
-  const file = path.join(dir, 'project.json')
-  const p = JSON.parse(fs.readFileSync(file, 'utf8'))
-  p.calendar = { months: months.map((m: string) => m.trim()), era: era.trim() }
-  await atomicWrite(file, JSON.stringify(p, null, 2))
-  return c.json(p.calendar)
+  return c.json(await setProjectKey(dir, 'calendar', { months: months.map((m: string) => m.trim()), era: era.trim() }))
 })

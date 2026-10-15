@@ -106,7 +106,6 @@ export async function createProject(root: string, name: string) {
 // ---- Backup and restore ----
 
 // Every file in the project except the index (a cache, rebuilt on open) and temp files: history, goals and drafts included.
-// improvement: the zip writer has no zip64, so a project over 4 GB or 65,535 files can't be backed up this way.
 export function projectFiles(dir: string) {
   return (fs.readdirSync(dir, { recursive: true }) as string[])
     .map((f) => f.split(path.sep).join('/'))

@@ -23,7 +23,7 @@ export function LinkPreview({ url, x, y }: { url: string; x: number; y: number }
 // Everything this entry says: dialogue tagged with it as the speaker, scene by scene in reading order.
 export function SpokenLines({ url, onOpen }: { url: string; onOpen: (id: string) => void }) {
   const [scenes, setScenes] = useState<{ id: string; title: string; lines: string[] }[]>([])
-  useEffect(() => void api(url + '/lines').then(setScenes), [url])
+  useEffect(() => void api(url + '/tagged').then((t) => setScenes(t.lines)), [url])
   if (!scenes.length) return null
   const total = scenes.reduce((n, s) => n + s.lines.length, 0)
   return (
@@ -114,7 +114,7 @@ type Description = { from: string; fromTitle: string; prop: string; text: string
 // reload: changes whenever the project's entries are refreshed (after any save), so a side pane stays current.
 export function Descriptions({ url, onOpenAt, reload }: { url: string; onOpenAt: (id: string, at: Passage) => void; reload: unknown }) {
   const [list, setList] = useState<Description[]>([])
-  useEffect(() => void api(url + '/descriptions').then(setList), [url, reload])
+  useEffect(() => void api(url + '/tagged').then((t) => setList(t.descriptions)), [url, reload])
   if (!list.length) return null
   const props = [...new Set(list.map((d) => d.prop))]
   return (

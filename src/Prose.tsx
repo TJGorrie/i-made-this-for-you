@@ -1,7 +1,7 @@
 // Prose stats view: the numbers from prose.ts for one book, plus the words and phrases you repeat most.
 import { useEffect, useMemo, useState } from 'react'
-import { api, readable, type Row } from './api.ts'
-import { CRUTCHES, dialogueWords, proseStats, proseText, wordsOf, type Count, type WordLists } from './prose.ts'
+import { aliasesOf, api, MANUSCRIPT_TYPES, readable, type Row } from './api.ts'
+import { CRUTCHES, proseStats, wordsOf, type Count, type WordLists } from './prose.ts'
 import { Help } from './Help.tsx'
 
 const byOrder = (a: Row, b: Row) => (a.order ?? 0) - (b.order ?? 0)
@@ -20,7 +20,8 @@ export function ProseView({ slug, rows, onSearch, words, onWords }: {
     fetch(url + 'md').then((r) => r.text()).then(setMd)
     fetch(url + 'scenes').then((r) => r.json()).then(setScenes)
   }, [slug, book?.id, rows])
-  const stats = useMemo(() => (md === undefined ? undefined : proseStats(md, words)), [md, words])
+  const names = useMemo(() => rows.filter((r) => !MANUSCRIPT_TYPES.includes(r.type)).flatMap((r) => [r.title, ...aliasesOf(r.aliases)]), [rows])
+  const stats = useMemo(() => (md === undefined ? undefined : proseStats(md, words, names)), [md, words, names])
   const byId = new Map(rows.map((r) => [r.id, r]))
 
   const list = (title: string, items: Count[], help?: string) => (
@@ -57,7 +58,7 @@ export function ProseView({ slug, rows, onSearch, words, onWords }: {
           </dl>
           <DialogueBySpeaker scenes={scenes} byId={byId} />
           <div className="prose-lists">
-            {list('Most used words', stats.topWords, 'Leaving out common words like "the" and "said".')}
+            {list('Most used words', stats.topWords, 'Leaving out common words like "the" and "said", and the names of your characters, places and other entries.')}
             {list('Repeated phrases', stats.phrases, 'Three-word phrases used three times or more.')}
             {list('-ly adverbs', stats.adverbs)}
             {list('Words to check', stats.crutches, 'Your list of words to look at again. Edit it below.')}
@@ -95,9 +96,8 @@ type Scene = { id: string; chapter: string; title: string; body: string; lines: 
 // Tagged dialogue grouped by speaker: lines, words, and their share of all tagged dialogue.
 function DialogueBySpeaker({ scenes, byId }: { scenes: Scene[]; byId: Map<string, Row> }) {
   const groups = new Map<string, { title: string; lines: number; words: number; scenes: Set<string> }>()
-  let tagged = 0, quoted = 0
+  let tagged = 0
   for (const s of scenes) {
-    quoted += dialogueWords(proseText(s.body))
     for (const l of s.lines) {
       const g = groups.get(l.id) ?? { title: byId.get(l.id)?.title ?? l.title, lines: 0, words: 0, scenes: new Set() }
       const n = wordsOf(readable(l.text)).length
@@ -106,7 +106,6 @@ function DialogueBySpeaker({ scenes, byId }: { scenes: Scene[]; byId: Map<string
     }
   }
   const list = [...groups.values()].sort((a, b) => b.words - a.words)
-  const untagged = Math.max(0, quoted - tagged) // tagged lines may or may not include their quote marks: approximate
   return (
     <section aria-label="Dialogue by speaker" className="dialogue-pov">
       <h3>Dialogue by speaker</h3>
@@ -125,7 +124,6 @@ function DialogueBySpeaker({ scenes, byId }: { scenes: Scene[]; byId: Map<string
           </tbody>
         </table>
       )}
-      {untagged > 0 && <p className="muted">About {untagged.toLocaleString()} word{untagged === 1 ? '' : 's'} of quoted dialogue aren't tagged.</p>}
     </section>
   )
 }

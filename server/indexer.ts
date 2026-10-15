@@ -69,6 +69,23 @@ export function resolveLinks(db: DatabaseSync, md: string) {
   })
 }
 
+// Aliases renamed in place ("The Fox" → "Red Fox" at the same spot in an equally long list) → old name (lowercased) → new.
+// Added, removed or reordered aliases aren't renames.
+export function aliasRenames(before: unknown, after: unknown) {
+  const [a, b] = [aliasesOf(before), aliasesOf(after)]
+  const has = (l: string[], s: string) => l.some((x) => x.toLowerCase() === s.toLowerCase())
+  return new Map(a.length !== b.length ? [] : a.flatMap((x, i) => (has(b, x) || has(a, b[i]) ? [] : [[x.toLowerCase(), b[i]]])))
+}
+
+// Every [[Old alias|id]] link in a field value (body, pov, lists, ...) → [[New alias|id]].
+export function renameAliasLinks(v: unknown, id: string, renames: Map<string, string>): unknown {
+  if (typeof v === 'string') return v.replace(LINK, (m, text: string, to: string) =>
+    to === id && renames.has(text.toLowerCase()) ? `[[${renames.get(text.toLowerCase())!.replace(/[\]|]/g, '')}|${id}]]` : m)
+  if (Array.isArray(v)) return v.map((x) => renameAliasLinks(x, id, renames))
+  if (v && typeof v === 'object') return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, renameAliasLinks(x, id, renames)]))
+  return v
+}
+
 // .md files under a project-relative folder, as project-relative paths.
 // On open (no saves in flight yet) it also deletes temp files left by a write that was cut short.
 function mdFiles(dir: string, relDir: string, cleanTmp = false) {

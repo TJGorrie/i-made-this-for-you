@@ -14,6 +14,15 @@ export function readGoals(dir: string): Goals {
 }
 export const writeGoals = (dir: string, g: Goals) => atomicWrite(path.join(dir, 'goals.json'), JSON.stringify(g, null, 2))
 
+// Requests that read goals.json, change it and write it back (a save's stats refresh, a finished sprint) take turns,
+// so neither overwrites the other's change. One queue for every project: these are a few milliseconds each.
+let queue: Promise<unknown> = Promise.resolve()
+export function goalsTurn<T>(f: () => Promise<T>) {
+  const run = queue.then(f)
+  queue = run.catch(() => {})
+  return run
+}
+
 // Record today's total; returns true if goals.json needs saving.
 export function recordDay(g: Goals, date: string, total: number) {
   const day = g.days[date]
